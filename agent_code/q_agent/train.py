@@ -1,10 +1,13 @@
 from collections import namedtuple, deque
 
+import numpy as np
+from .callbacks import ACTIONS, state_to_features, MODEL_FILE
+
 import pickle
 from typing import List
 
 import events as e
-from .callbacks import state_to_features
+from .callbacks import ACTIONS, state_to_features
 
 # This is only an example!
 Transition = namedtuple('Transition',
@@ -14,8 +17,13 @@ Transition = namedtuple('Transition',
 TRANSITION_HISTORY_SIZE = 3  # keep only ... last transitions
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 
-# Events
-PLACEHOLDER_EVENT = "PLACEHOLDER"
+ACTION_TO_DELTA = {
+    "UP": (0, -1),
+    "RIGHT": (1, 0),
+    "DOWN": (0, 1),
+    "LEFT": (-1, 0),
+    "WAIT": (0, 0),
+}
 
 
 def setup_training(self):
@@ -49,13 +57,41 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+    old_state = tuple(state_to_features(old_game_state))
+    new_state = tuple(state_to_features(new_game_state))
+    action_index = ACTIONS.index(self_action)
+    
 
-    # Idea: Add your own events to hand out rewards
-    if ...:
-        events.append(PLACEHOLDER_EVENT)
+    #did we move closer to or away from a coin? 
+    if old_game_state["coins"]:
+        coin_dx, coin_dy = old_state[0], old_state[1]
+        action_dx, action_dy = ACTION_TO_DELTA[self_action]
+
+        if (action_dx, action_dy) == (coin_dx, coin_dy):
+            events.append(e.MOVED_CLOSE_TO_COIN)
+        else:
+            events.append(e.MOVED_AWAY_FROM_COIN)
+
+    reward = reward_from_events(self, events)
+
+
+    if old_state not in self.model:
+        self.model[old_state] = np.zeros(len(ACTIONS))
+
+    if new_state not in self.model:
+        self.model[new_state] = np.zeros(len(ACTIONS))
+
+    old_q_value = self.model[old_state][action_index]
+    future_q_value = np.max(self.model[new_state])
+
+    new_q_value = old_q_value + self.alpha * (
+        reward + self.gamma * future_q_value - old_q_value
+    )
+
+    self.model[old_state][action_index] = new_q_value
 
     # state_to_features is defined in callbacks.py
-    self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
+    self.transitions.append(Transition(old_state, self_action, new_state, reward))
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
@@ -72,11 +108,24 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     :param self: The same object that is passed to all of your callbacks.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
+    last_state = tuple(state_to_features(last_game_state))
+    reward = reward_from_events(self, events)
+    
 
+    self.transitions.append(Transition(last_state, last_action, None, reward))
+
+    if last_state not in self.model:
+        self.model[last_state] = np.zeros(len(ACTIONS))
+
+    old_q_value = self.model[last_state][ACTIONS.index(last_action)]
+    new_q_value = old_q_value + self.alpha * (reward - old_q_value)
+
+    self.model[last_state][ACTIONS.index(last_action)] = new_q_value
+    
     # Store the model
-    with open("my-saved-model.pt", "wb") as file:
+    with open(MODEL_FILE, "wb") as file:
         pickle.dump(self.model, file)
+    
 
 
 def reward_from_events(self, events: List[str]) -> int:
@@ -87,9 +136,11 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 1,
-        e.KILLED_OPPONENT: 5,
-        PLACEHOLDER_EVENT: -.1  # idea: the custom event is bad
+        e.COIN_COLLECTED: 10,
+        e.MOVED_CLOSE_TO_COIN: 3,
+        e.MOVED_AWAY_FROM_COIN: -3,
+        e.WAITED: -1,
+        e.INVALID_ACTION : -5,
     }
     reward_sum = 0
     for event in events:
