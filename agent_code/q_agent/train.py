@@ -145,11 +145,11 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 5,
+        e.COIN_COLLECTED: 8,
         e.MOVED_CLOSE_TO_COIN: 3,
         e.MOVED_AWAY_FROM_COIN: -3,
-        e.MOVED_CLOSE_TO_ENEMY: -1,
-        e.MOVED_AWAY_FROM_ENEMY: 1,
+        e.MOVED_CLOSE_TO_ENEMY: -2,
+        e.MOVED_AWAY_FROM_ENEMY: 2,
         e.WAITED: -1,
         e.INVALID_ACTION : -3,
     }

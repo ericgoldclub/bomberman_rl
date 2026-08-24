@@ -77,7 +77,7 @@ def setup(self):
     """
   
     #setup the q learning model
-    self.epsilon = 0.3  # Exploration rate
+    self.epsilon = 0.1  # Exploration rate
     self.alpha = 0.1    # Learning rate
     self.gamma = 0.9    # Discount factor
 
