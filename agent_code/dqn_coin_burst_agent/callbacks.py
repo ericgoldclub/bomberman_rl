@@ -1,5 +1,6 @@
 import os
 import random
+import logging
 
 import numpy as np
 
@@ -14,6 +15,67 @@ BOARD_SIZE = 17
 
 BOMB_POWER = 3
 BOMB_TIMER = 4
+
+def valid_action_mask(game_state):
+    field = game_state["field"]
+    bombs = game_state["bombs"]
+    explosion_map = game_state["explosion_map"]
+    _, _, bombs_left, (x, y) = game_state["self"]
+
+    danger = bomb_danger_tiles(field, bombs)
+
+    mask = np.ones(len(ACTIONS), dtype=bool)
+
+    for i, action in enumerate(ACTIONS):
+        if action == 'BOMB':
+            mask[i] = bombs_left and can_hit_crate_with_bomb(field, x, y)
+            continue
+
+        if action == 'WAIT':
+            mask[i] = not ((x, y) in danger or explosion_map[x, y] > 0)
+            continue
+
+        dx, dy = {
+            'UP': (0, -1),
+            'RIGHT': (1, 0),
+            'DOWN': (0, 1),
+            'LEFT': (-1, 0)
+            }[action]
+
+        nx, ny = x + dx, y + dy
+
+        if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
+            mask[i] = False
+            continue
+
+        is_free = field[nx, ny] == 0
+        is_safe = (nx, ny) not in danger and explosion_map[nx, ny] == 0
+
+        mask[i] = is_free and is_safe
+
+    #fallback falls alles gefährlich ist, wenigstens alles was möglich ist erlauben
+
+    if not mask.any():
+        for i, action in enumerate(ACTIONS):
+            if action in ['WAIT', 'BOMB']:
+                mask[i] = False
+                continue
+
+            dx, dy = {
+                'UP': (0, -1),
+                'RIGHT': (1, 0),
+                'DOWN': (0, 1),
+                'LEFT': (-1, 0)
+            }[action]
+
+            nx, ny = x + dx, y + dy
+            mask[i] = 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and field[nx, ny] == 0
+
+    if not mask.any():
+        mask[ACTIONS.index('WAIT')] = True
+
+    return mask
+
 
 def bomb_danger_tiles(field, bombs, bomb_power=BOMB_POWER):
     danger = set()
@@ -110,7 +172,7 @@ def look_for_targets(free_space, start, targets, logger=None):
 def setup(self):
     """Setup called once when loading the agent."""
     # hyperparams for acting
-    self.epsilon = 0.3
+    self.epsilon = 1.0
     # Load model if available
     try:
         from .train import HybridDQN
@@ -212,31 +274,40 @@ def act(self, game_state: dict) -> str:
     state = state_to_features(game_state)
     board, vector = state
 
-    self.logger.debug(f"State features: {state}")
+    self.logger.debug(f"Vector features: {vector}")
+
+    mask = valid_action_mask(game_state)
+    valid_actions = [action for action, valid in zip(ACTIONS, mask) if valid]
+    epsilon = self.epsilon if self.train else 0.0
+
+    if self.train and hasattr(self, 'steps_done'):
+        epsilon = max(0.05, self.epsilon * (0.9995 ** self.steps_done))
+
+    logging.getLogger('BombeRLeWorld').info(
+        f'Agent <dqn_coin_burst_agent> current epsilon {epsilon:.4f}'
+    )
 
     # If we fell back to table model
     if hasattr(self, 'model'):
-        if self.train and random.random() < self.epsilon:
-            return random.choice(ACTIONS)
-        return random.choice(ACTIONS)
+        if self.train and random.random() < epsilon:
+            return random.choice(valid_actions)
+        return random.choice(valid_actions)
 
     # use DQN policy
     try:
         import torch
         board_tensor = torch.tensor(board, dtype=torch.float32, device=self.device).unsqueeze(0)
         vector_tensor = torch.tensor(vector, dtype=torch.float32, device=self.device).unsqueeze(0)
-        epsilon = self.epsilon if self.train else 0.0  # No exploration during evaluation
-
-        if self.train and hasattr(self, 'steps_done'):
-            epsilon = max(0.05, self.epsilon * (0.995 ** self.steps_done))  # Decay epsilon over time
         # Epsilon-greedy
         if self.train and random.random() < epsilon:
-            return random.choice(ACTIONS)
+            return random.choice(valid_actions)
 
         with torch.no_grad():
-            qvals = self.policy_net(board_tensor, vector_tensor)
+            qvals = self.policy_net(board_tensor, vector_tensor).squeeze(0)
+            mask_tensor = torch.tensor(mask, dtype=torch.bool, device=self.device)
+            qvals[~mask_tensor] = float('-inf')  # Mask invalid actions
             action_index = int(torch.argmax(qvals).item())
             return ACTIONS[action_index]
     except Exception as exc:
         self.logger.warning("DQN act failed, falling back to random: %s", exc)
-        return random.choice(ACTIONS)
+        return random.choice(valid_actions)

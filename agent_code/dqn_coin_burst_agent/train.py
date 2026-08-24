@@ -70,10 +70,6 @@ def setup_training(self):
     self.policy_net.to(self.device)
     self.target_net.to(self.device)
 
-    # For convenience: keep epsilon parameters on self (can be tuned)
-    self.epsilon_start = 1.0
-    self.epsilon_end = 0.05
-    self.epsilon_decay = 20000
 
 
 def optimize_model(self):
@@ -200,13 +196,14 @@ def reward_from_events(self, events: List[str]) -> int:
         e.CRATE_DESTROYED: 8,
         e.USEFUL_BOMB_DROPPED: 1,
         e.USELESS_BOMB_DROPPED: -5,
-        e.MOVED_CLOSE_TO_COIN: 2,
+        e.MOVED_CLOSE_TO_COIN: 3,
         e.MOVED_AWAY_FROM_COIN: -2,
         e.MOVED_TOWARDS_CRATE: 1,
         e.MOVED_AWAY_FROM_CRATE: -1,
         e.INVALID_ACTION: -4,
         e.KILLED_SELF: -40,
         e.GOT_KILLED: -40,
+        e.WAITED: -3,
 
         }
     reward_sum = 0
