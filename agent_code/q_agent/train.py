@@ -7,7 +7,7 @@ import pickle
 from typing import List
 
 import events as e
-from .callbacks import ACTIONS, state_to_features
+
 
 # This is only an example!
 Transition = namedtuple('Transition',
@@ -74,6 +74,15 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     reward = reward_from_events(self, events)
 
+    #did we move closer to enemy?
+    if old_game_state["others"]:
+        enemy_dx, enemy_dy = old_state[2], old_state[3]
+        action_dx, action_dy = ACTION_TO_DELTA[self_action]
+
+        if (action_dx, action_dy) == (enemy_dx, enemy_dy):
+            events.append(e.MOVED_CLOSE_TO_ENEMY)
+        else:
+            events.append(e.MOVED_AWAY_FROM_ENEMY)
 
     if old_state not in self.model:
         self.model[old_state] = np.zeros(len(ACTIONS))
@@ -136,11 +145,13 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 10,
+        e.COIN_COLLECTED: 5,
         e.MOVED_CLOSE_TO_COIN: 3,
         e.MOVED_AWAY_FROM_COIN: -3,
+        e.MOVED_CLOSE_TO_ENEMY: -1,
+        e.MOVED_AWAY_FROM_ENEMY: 1,
         e.WAITED: -1,
-        e.INVALID_ACTION : -5,
+        e.INVALID_ACTION : -3,
     }
     reward_sum = 0
     for event in events:
