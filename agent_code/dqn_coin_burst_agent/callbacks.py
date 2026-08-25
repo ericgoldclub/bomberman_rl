@@ -187,11 +187,13 @@ def setup(self):
             state = torch.load(MODEL_FILE, map_location=self.device)
 
             if isinstance(state, dict) and 'model_state_dict' in state:
-                state = state['model_state_dict']
+                model_state = state['model_state_dict']
+                self.steps_done = state.get('steps_done', 0)
+            else:
+                model_state = state
 
-            self.policy_net.load_state_dict(state['model_state_dict'])
-            self.target_net.load_state_dict(state['model_state_dict'])
-            self.steps_done = state.get('steps_done', 0)
+            self.policy_net.load_state_dict(model_state)
+            self.target_net.load_state_dict(model_state)
             self.policy_net.eval()
             self.target_net.eval()
         else:
