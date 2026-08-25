@@ -10,11 +10,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BEST_MODEL_FILE, _is_valid_action
+from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BEST_MODEL_FILE, _feature_dimensions, _is_valid_action, _policy_action_mask
 import events as e
 import settings as s
 
-Transition = namedtuple('Transition', ('grid', 'scalar', 'action', 'next_grid', 'next_scalar', 'reward'))
+Transition = namedtuple('Transition', ('grid', 'scalar', 'action', 'next_grid', 'next_scalar', 'next_action_mask', 'reward'))
 
 # Hyperparameters
 BUFFER_SIZE = 100_000
@@ -28,14 +28,12 @@ TRAIN_EVERY_STEPS = 8
 
 class DQN(nn.Module):
     '''
-    The model combines a small CNN for grid channels with a MLP for scalar features, 
-    such as (x, y) coordinates of the agent and the direction to the nearest coin. 
+    The model combines a small CNN for grid channels with a MLP for scalar features,
+    such as bomb availability, target distances, and remaining time.
     The outputs are Q-values for each action.
     '''
     def __init__(self, in_channels : int, grid_size: tuple[int, int] , scalar_size : int, n_actions : int):
         super().__init__()
-        H, W = grid_size
-
         # CNN for grid channels
         self.cnn = nn.Sequential(
             nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
@@ -48,7 +46,9 @@ class DQN(nn.Module):
             nn.ReLU(),
         )
         
-        cnn_out_dim = 128*5*5
+        with torch.no_grad():
+            dummy = torch.zeros(1, in_channels, grid_size[0], grid_size[1])
+            cnn_out_dim = int(self.cnn(dummy).flatten(1).shape[1])
 
         # MLP for scalar features
         self.scalar_fc = nn.Sequential(
@@ -103,10 +103,14 @@ def setup_training(self):
     self.previous_velocity = (0,0)
     self.position_history = deque(maxlen=4)
 
-    # Determine sizes from self (set by callbacks.setup) or fall back to defaults
-    C = getattr(self, 'grid_channels', 7)
+    # Determine sizes from self (set by callbacks.setup) or infer them from the feature extractor.
+    C = getattr(self, 'grid_channels', None)
+    if C is None:
+        C, _ = _feature_dimensions()
     H, W = getattr(self, 'grid_size', (17, 17))
-    S = getattr(self, 'scalar_size', 5)
+    S = getattr(self, 'scalar_size', None)
+    if S is None:
+        _, S = _feature_dimensions()
 
     # Instantiate networks if not already present
     if not hasattr(self, 'policy_net'):
@@ -148,6 +152,7 @@ def optimize_model(self):
     non_final_next_grid_np = np.stack([b.next_grid for b in batch if b.next_grid is not None], axis=0) if non_final_mask_np.any() else np.empty((0, states_grid.shape[1], states_grid.shape[2], states_grid.shape[3]), dtype=np.float32)
 
     non_final_next_scalar_np = np.stack([b.next_scalar for b in batch if b.next_scalar is not None], axis=0) if non_final_mask_np.any() else np.empty((0, states_scalar.shape[1]), dtype=np.float32)
+    non_final_next_action_mask_np = np.stack([b.next_action_mask for b in batch if b.next_action_mask is not None], axis=0) if non_final_mask_np.any() else np.empty((0, len(ACTIONS)), dtype=bool)
 
     # Convert to torch tensors
 
@@ -159,24 +164,26 @@ def optimize_model(self):
     nonfinal_next_grid = torch.from_numpy(non_final_next_grid_np.astype(np.float32)).to(self.device) if non_final_next_grid_np.size else torch.empty((0, states_grid.shape[1], states_grid.shape[2], states_grid.shape[3]), device=self.device)
 
     nonfinal_next_scalar = torch.from_numpy(non_final_next_scalar_np.astype(np.float32)).to(self.device) if non_final_next_scalar_np.size else torch.empty((0, states_scalar.shape[1]), device=self.device)
+    nonfinal_next_action_mask = torch.from_numpy(non_final_next_action_mask_np.astype(np.bool_)).to(self.device) if non_final_next_action_mask_np.size else torch.empty((0, len(ACTIONS)), dtype=torch.bool, device=self.device)
 
     # Compute Q(s_t, a)
     q_values_all = self.policy_net(states_grid, states_scalar) # (B, n_actions)
     q_values = q_values_all.gather(1, actions) # (B, 1)
 
-    # Double DQN target evaluation 
+    # Double DQN target evaluation
     next_q_values = torch.zeros((BATCH_SIZE, 1), device=self.device)
     if nonfinal_next_grid.size(0) > 0:
-        # Get the best actions from policy network 
-        next_policy_q = self.policy_net(nonfinal_next_grid, nonfinal_next_scalar) # (B', n_actions)
-        next_actions = next_policy_q.argmax(dim=1, keepdim=True) # (B', 1)
-        # Evaluate these actions using target network
-        next_target_q = self.target_net(nonfinal_next_grid, nonfinal_next_scalar).gather(1, next_actions) # (B', 1)
+        with torch.no_grad():
+            next_policy_q = self.policy_net(nonfinal_next_grid, nonfinal_next_scalar) # (B', n_actions)
+            next_policy_q = next_policy_q.masked_fill(~nonfinal_next_action_mask, float('-inf'))
+            next_actions = next_policy_q.argmax(dim=1, keepdim=True) # (B', 1)
+            # Evaluate these actions using target network
+            next_target_q = self.target_net(nonfinal_next_grid, nonfinal_next_scalar).gather(1, next_actions) # (B', 1)
         # Assign next Q-values into the full batch tensor at indices of non-final transitions
         # Convert boolean mask to torch on device
         non_final_mask = torch.from_numpy(non_final_mask_np).to(self.device)
         # next_target_q has shape (N,1); place its values into next_q_values where mask is True
-        next_q_values[non_final_mask, 0] = next_target_q.squeeze(1).detach()
+        next_q_values[non_final_mask, 0] = next_target_q.squeeze(1)
 
     expected_q = rewards + (GAMMA * next_q_values)
     loss = self.loss_fn(q_values, expected_q)
@@ -249,14 +256,17 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         old_grid, old_scalar = old_feats
         if new_feats is not None:
             new_grid, new_scalar = new_feats
+            next_action_mask = _policy_action_mask(new_game_state)
         else:
             new_grid, new_scalar = None, None
+            next_action_mask = None
 
         # store transition (use copies to avoid accidental mutation)
         self.replay_buffer.append(Transition(old_grid.copy(), old_scalar.copy(),
                                              self_action,
                                              None if new_grid is None else new_grid.copy(),
                                              None if new_scalar is None else new_scalar.copy(),
+                                             None if next_action_mask is None else next_action_mask.copy(),
                                              reward))
 
         # update step counter and train periodically to reduce compute cost
@@ -277,7 +287,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # terminal state: next_state is None
     if last_state is not None:
         last_grid, last_scalar = last_state
-        self.replay_buffer.append(Transition(last_grid.copy(), last_scalar.copy(), last_action, None, None, reward))
+        self.replay_buffer.append(Transition(last_grid.copy(), last_scalar.copy(), last_action, None, None, None, reward))
 
     # Do some final optimization passes
     for _ in range(10):
