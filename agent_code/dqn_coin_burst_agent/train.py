@@ -19,7 +19,7 @@ BUFFER_SIZE = 3000
 BATCH_SIZE = 16
 GAMMA = 0.97
 LR = 1e-3
-TARGET_UPDATE = 8012  # steps
+TARGET_UPDATE = 512  # steps
 MIN_REPLAY_SIZE = 256
 TRAINING_STEPS = 4
 TRAIN_EVERY = 4
@@ -257,8 +257,8 @@ def reward_from_events(self, events: List[str]) -> int:
         e.INVALID_ACTION: -8,
         e.KILLED_SELF: -50,
         e.GOT_KILLED: -50,
-        e.WAITED: -1,
-        e.OSCILLATION: -1,
+        e.WAITED: -5,
+        e.OSCILLATION: -5,
         #e.STEP_PENALTY: -0.1,  # Small penalty for each step to encourage faster completion
         }
     reward_sum = 0
