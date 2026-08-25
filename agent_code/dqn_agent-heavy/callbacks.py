@@ -347,28 +347,16 @@ def state_to_features(game_state: dict) -> np.array:
     self_map = np.zeros_like(field, dtype=np.float32)
     self_map[x, y] = 1.0
 
-    danger_map = (explosion_map > 0).astype(np.float32)
-    for (bx, by), timer in bombs:
-        if not (0 <= bx < H and 0 <= by < W):
-            continue
-        blast = {(bx, by)}
-        for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
-            for step in range(1, s.BOMB_POWER + 1):
-                nx, ny = bx + dx * step, by + dy * step
-                if not (0 <= nx < H and 0 <= ny < W):
-                    break
-                if field[nx, ny] == -1:
-                    break
-                blast.add((nx, ny))
-        urgency = 1.0 / max(float(timer), 1.0)
-        for x_cell, y_cell in blast:
-            danger_map[x_cell, y_cell] = max(danger_map[x_cell, y_cell], urgency)
+    bomb_timer = np.zeros_like(field, dtype=np.float32)
+    max_timer = 1.0
+    for (bx, by), t in bombs:
+        bomb_timer[bx, by] = t
+        max_timer = max(max_timer, t)
+    if max_timer > 0:
+        bomb_timer = bomb_timer.astype(np.float32) / float(max_timer) # normalize to [0,1]
 
-    coord_idx = np.fromfunction(
-        lambda y, x: (x + y * W) / float(max(1, H * W)),
-        (H, W),
-        dtype=np.float32,
-    )
+    x_coords = np.tile(np.linspace(0.0, 1.0, W, dtype=np.float32), (H, 1)).T
+    y_coords = np.tile(np.linspace(0.0, 1.0, H, dtype=np.float32), (W, 1))
 
     grid = np.stack([
         walls,
@@ -376,8 +364,10 @@ def state_to_features(game_state: dict) -> np.array:
         coins_map,
         others_map,
         self_map,
+        bomb_timer,
         danger_map,
-        coord_idx,
+        x_coords,
+        y_coords
     ], axis=0).astype(np.float32)
 
 

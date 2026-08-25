@@ -36,16 +36,19 @@ class DQN(nn.Module):
         super().__init__()
         # CNN for grid channels
         self.cnn = nn.Sequential(
-        nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-        nn.ReLU(),
-        )
+            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
 
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+
+            nn.Conv2d(64,128, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+        )
+        
         with torch.no_grad():
             dummy = torch.zeros(1, in_channels, grid_size[0], grid_size[1])
             cnn_out_dim = int(self.cnn(dummy).flatten(1).shape[1])
-
 
         # MLP for scalar features
         self.scalar_fc = nn.Sequential(
@@ -128,7 +131,7 @@ def setup_training(self):
     # For convenience: keep epsilon parameters on self (can be tuned)
     self.epsilon_start = 1.0
     self.epsilon_end = 0.05
-    self.epsilon_decay = 259145
+    self.epsilon_decay = 1036579
 
     # Attach a helper to compute current epsilon
     self.get_epsilon = lambda: self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-1.0 * self.steps_done / self.epsilon_decay)
