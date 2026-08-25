@@ -74,7 +74,7 @@ def setup(self):
         self.device = None
 
     # Authoritative feature sizes used by train.py and act()
-    self.grid_channels = 9
+    self.grid_channels = 7
     self.scalar_size = 5
     # Grid size (COLS, ROWS) as used by the environment
     self.grid_size = (s.COLS, s.ROWS)
@@ -152,16 +152,15 @@ def _is_valid_action(game_state: dict, action: str) -> bool:
     field = game_state["field"]
     _, _, _, (x, y) = game_state["self"]
     others = [o[-1] for o in game_state["others"] if o[-1] is not None]
-    bomb_positions = {pos for (pos, _) in game_state.get("bombs", [])}
 
     if action == 'UP':
-        return y > 0 and field[x, y - 1] != -1 and field[x, y - 1] != 1 and (x, y - 1) not in others and (x, y - 1) not in bomb_positions
+        return y > 0 and field[x, y - 1] != -1 and field[x, y - 1] != 1 and (x, y - 1) not in others
     if action == 'RIGHT':
-        return x + 1 < field.shape[0] and field[x + 1, y] != -1 and field[x + 1, y] != 1 and (x + 1, y) not in others and (x + 1, y) not in bomb_positions
+        return x + 1 < field.shape[0] and field[x + 1, y] != -1 and field[x + 1, y] != 1 and (x + 1, y) not in others
     if action == 'DOWN':
-        return y + 1 < field.shape[1] and field[x, y + 1] != -1 and field[x, y + 1] != 1 and (x, y + 1) not in others and (x, y + 1) not in bomb_positions
+        return y + 1 < field.shape[1] and field[x, y + 1] != -1 and field[x, y + 1] != 1 and (x, y + 1) not in others
     if action == 'LEFT':
-        return x > 0 and field[x - 1, y] != -1 and field[x - 1, y] != 1 and (x - 1, y) not in others and (x - 1, y) not in bomb_positions
+        return x > 0 and field[x - 1, y] != -1 and field[x - 1, y] != 1 and (x - 1, y) not in others
     if action == 'WAIT':
         return True
     if action == 'BOMB':
@@ -213,9 +212,6 @@ def state_to_features(game_state: dict) -> np.array:
     if max_timer > 0:
         bomb_timer = bomb_timer.astype(np.float32) / float(max_timer) # normalize to [0,1]
 
-    x_coords = np.tile(np.linspace(0.0, 1.0, W, dtype=np.float32), (H, 1)).T
-    y_coords = np.tile(np.linspace(0.0, 1.0, H, dtype=np.float32), (W, 1))
-
     grid = np.stack([
         walls,
         crates,
@@ -224,8 +220,6 @@ def state_to_features(game_state: dict) -> np.array:
         self_map,
         bomb_timer,
         danger_map,
-        x_coords,
-        y_coords
     ], axis=0).astype(np.float32)
 
 
@@ -284,12 +278,7 @@ def act(self, game_state: dict) -> str:
                     chosen_action = 'WAIT'
                 else:
                     safe_actions = [a for a in valid_actions if not (a == 'BOMB' and _bomb_is_unsafe(game_state))]
-                    candidates = safe_actions if safe_actions else valid_actions
-                    if np.max(explosion_map) == 0 and coins_remaining > 0:
-                        non_wait_candidates = [a for a in candidates if a != 'WAIT']
-                        if non_wait_candidates:
-                            candidates = non_wait_candidates
-                    chosen_action = random.choice(candidates)
+                    chosen_action = random.choice(safe_actions if safe_actions else valid_actions)
                 self.logger.info(
                     f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
                     f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"

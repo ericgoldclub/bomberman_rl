@@ -22,7 +22,7 @@ BATCH_SIZE = 32
 GAMMA = 0.97
 LR = 1e-4
 TARGET_UPDATE = 500  # steps
-MIN_REPLAY_SIZE = 512
+MIN_REPLAY_SIZE = 256
 TRAIN_EVERY_STEPS = 2
 
 
@@ -93,7 +93,6 @@ def setup_training(self):
     self.steps_done = 0
     self.round_coins_collected = 0
     self.best_round_coins = -1
-    self.previous_old_position = None
 
     # Determine sizes from self (set by callbacks.setup) or fall back to defaults
     C = getattr(self, 'grid_channels', 7)
@@ -109,7 +108,7 @@ def setup_training(self):
         self.target_net.eval()  # target net is not trained, only used for evaluation
 
     self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LR)
-    self.loss_fn = nn.MSELoss()
+    self.loss_fn = nn.SmoothL1Loss()
 
     # Device
     self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -117,7 +116,7 @@ def setup_training(self):
     self.target_net.to(self.device)
 
     # For convenience: keep epsilon parameters on self (can be tuned)
-    self.epsilon_start = 1.0
+    self.epsilon_start = 1.0*0
     self.epsilon_end = 0.05
     self.epsilon_decay = 30000/2
 
@@ -206,34 +205,17 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             if has_valid_move:
                 events.append(e.SAFE_WAIT)
 
-        if old_game_state is not None:
+        if old_game_state is not None and old_game_state["coins"]:
             old_pos = old_game_state["self"][-1]
             new_pos = new_game_state["self"][-1]
-            if self_action in ('UP', 'RIGHT', 'DOWN', 'LEFT') and self.previous_old_position is not None:
-                if new_pos == self.previous_old_position:
-                    events.append(e.REVISITED_PREVIOUS_TILE)
-
-            if old_game_state["coins"]:
-                old_dists = [abs(old_pos[0] - cx) + abs(old_pos[1] - cy) for cx, cy in old_game_state["coins"]]
-                new_dists = [abs(new_pos[0] - cx) + abs(new_pos[1] - cy) for cx, cy in new_game_state["coins"]]
-                old_min = min(old_dists) if old_dists else 1e9
-                new_min = min(new_dists) if new_dists else 1e9
-                if new_min < old_min:
-                    events.append(e.MOVED_CLOSE_TO_COIN)
-                elif new_min > old_min:
-                    events.append(e.MOVED_AWAY_FROM_COIN)
-
-            old_others = [o[-1] for o in old_game_state["others"] if o[-1] is not None]
-            new_others = [o[-1] for o in new_game_state["others"] if o[-1] is not None]
-            if old_others and new_others:
-                old_enemy_min = min(abs(old_pos[0] - ox) + abs(old_pos[1] - oy) for ox, oy in old_others)
-                new_enemy_min = min(abs(new_pos[0] - ox) + abs(new_pos[1] - oy) for ox, oy in new_others)
-                if new_enemy_min < old_enemy_min:
-                    events.append(e.MOVED_CLOSE_TO_ENEMY)
-                elif new_enemy_min > old_enemy_min:
-                    events.append(e.MOVED_AWAY_FROM_ENEMY)
-
-            self.previous_old_position = old_pos
+            old_dists = [abs(old_pos[0] - cx) + abs(old_pos[1] - cy) for cx, cy in old_game_state["coins"]]
+            new_dists = [abs(new_pos[0] - cx) + abs(new_pos[1] - cy) for cx, cy in new_game_state["coins"]]
+            old_min = min(old_dists) if old_dists else 1e9
+            new_min = min(new_dists) if new_dists else 1e9
+            if new_min < old_min:
+                events.append(e.MOVED_CLOSE_TO_COIN)
+            elif new_min > old_min:
+                events.append(e.MOVED_AWAY_FROM_COIN)
 
     reward = reward_from_events(self, events)
     old_feats = state_to_features(old_game_state)
@@ -290,7 +272,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         )
 
     self.round_coins_collected = 0
-    self.previous_old_position = None
 
 
 def reward_from_events(self, events: List[str]) -> float:
@@ -306,53 +287,31 @@ def reward_from_events(self, events: List[str]) -> float:
     - Penalize meaningless waiting or invalid actions.
     - Reward eliminating opponents and surviving rounds.
     """
-    # Split rewards into:
-    # - major outcomes (coin collection / death), which should dominate learning
-    # - shaping terms (movement heuristics), which are clipped per step
-    major_rewards = {
-        e.COIN_COLLECTED: 1.0,
-        e.CRATE_DESTROYED: 0.35,
-        e.KILLED_OPPONENT: 2.0,
-        e.KILLED_SELF: -1.2,
-        e.GOT_KILLED: -1.0,
-        e.COIN_FOUND: 0.10,
-    }
-    shaping_rewards = {
-        e.MOVED_LEFT: 0.0,
-        e.MOVED_RIGHT: 0.0,
-        e.MOVED_UP: 0.0,
-        e.MOVED_DOWN: 0.0,
-        e.MOVED_CLOSE_TO_COIN: 0.08,
-        e.MOVED_AWAY_FROM_COIN: -0.08,
-        e.MOVED_CLOSE_TO_ENEMY: -0.00,
-        e.MOVED_AWAY_FROM_ENEMY: 0.00,
-        e.REVISITED_PREVIOUS_TILE: -0.5,
-        e.WAITED: -0.03,
-        e.SAFE_WAIT: -0.06,
-        e.INVALID_ACTION: -0.12,
-        e.BOMB_DROPPED: -0.15,
-        e.BOMB_EXPLODED: 0.0,
-        e.IN_DANGER: -0.20,
-        e.OPPONENT_ELIMINATED: 0.0,
-        e.SURVIVED_ROUND: 0.0,
+    # Minimal reward set focused on coin collection.
+    game_rewards = {
+        e.COIN_COLLECTED: 20.0,
+        e.MOVED_CLOSE_TO_COIN: 1.0,
+        e.MOVED_AWAY_FROM_COIN: -1.0,
+        e.WAITED: -2.0,
+        e.SAFE_WAIT: -2.0,
+        e.INVALID_ACTION: -2.0,
+        e.BOMB_DROPPED: -4.0,
+        e.IN_DANGER: -6.0,
+        e.KILLED_SELF: -20.0,
+        e.GOT_KILLED: -8.0,
     }
 
-    major_sum = 0.0
-    shaping_sum = 0.0
+    reward_sum = 0.0
     for event in events:
-        major_sum += major_rewards.get(event, 0.0)
-        shaping_sum += shaping_rewards.get(event, 0.0)
+        reward_sum += game_rewards.get(event, 0.0)
 
-    # Prevent step-wise shaping terms from overshadowing major outcomes.
-    shaping_sum = float(np.clip(shaping_sum, -0.3, 0.3))
-    reward_sum = major_sum + shaping_sum
+    # Strongly suppress fatal trajectories.
+    if e.KILLED_SELF in events or e.GOT_KILLED in events:
+        reward_sum -= 2.0
 
     # Log the reward (use info for traceability)
     try:
-        self.logger.info(
-            f"Awarded {reward_sum:.3f} (major={major_sum:.3f}, shaping={shaping_sum:.3f}) "
-            f"for events {', '.join(events)}"
-        )
+        self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     except Exception:
         pass
 
