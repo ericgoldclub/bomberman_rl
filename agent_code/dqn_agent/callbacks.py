@@ -262,8 +262,8 @@ def state_to_features(game_state: dict) -> np.array:
             return H + W
         return min(abs(px - x) + abs(py - y) for px, py in targets)
 
-    dist_coin = nearest_target(coins) / float(H + W)
-    dist_enemy = nearest_target(others) / float(H + W)
+    dist_coin = nearest_target(coins) 
+    dist_enemy = nearest_target(others) 
     time_remaining = 1.0 - (game_state["step"] / float(s.MAX_STEPS))
 
     scalar = np.array([bombs_left, dist_coin, dist_enemy, time_remaining], dtype=np.float32)
