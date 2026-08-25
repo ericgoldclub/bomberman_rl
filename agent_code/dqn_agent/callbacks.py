@@ -387,10 +387,10 @@ def state_to_features(game_state: dict) -> np.array:
 
     if len(coins) == 0 and not any(enemy_pos is not None for _, enemy_pos in opponent_slots):
         coin_count_normalized = 0.0
-        dist_coin = 0.0
         enemy_features = [0.0, 0.0] * MAX_OPPONENT_SLOTS
+        time_remaining = 1.0 - (game_state["step"] / float(s.MAX_STEPS))
         scalar = np.array(
-            [bombs_left, coin_count_normalized, dist_coin, time_remaining := 1.0 - (game_state["step"] / float(s.MAX_STEPS)), *enemy_features],
+            [bombs_left, coin_count_normalized, time_remaining, *enemy_features],
             dtype=np.float32,
         )
         return grid, scalar
@@ -432,8 +432,9 @@ def state_to_features(game_state: dict) -> np.array:
     while len(enemy_features) < MAX_OPPONENT_SLOTS * 2:
         enemy_features.extend([0.0, 0.0])
 
+    #dist_coin
     scalar = np.array(
-        [bombs_left, coin_count_normalized, dist_coin, time_remaining, *enemy_features],
+        [bombs_left, coin_count_normalized, time_remaining, *enemy_features],
         dtype=np.float32
     )
 

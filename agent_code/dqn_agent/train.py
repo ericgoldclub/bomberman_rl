@@ -207,6 +207,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         if explosion_map[x, y] > 0:
             events.append(e.IN_DANGER)
 
+        '''
         if self_action == 'WAIT' and np.max(explosion_map) == 0 and new_game_state.get("coins"):
             has_valid_move = any(
                 _is_valid_action(new_game_state, action)
@@ -214,7 +215,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             )
             if has_valid_move:
                 events.append(e.SAFE_WAIT)
+        '''
 
+        '''
         if old_game_state is not None:
             old_pos = old_game_state["self"][-1]
             new_pos = new_game_state["self"][-1]
@@ -228,7 +231,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 skp = current_vx*previous_vx + current_vy*previous_vy
                 if skp < 0:
                     events.append(e.REVERSED_DIRECTION)
-
+           
 
 
             old_others = [o[-1] for o in old_game_state["others"] if o[-1] is not None]
@@ -244,7 +247,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             self.previous_old_position = old_pos
             # Update velocity for next step's reversal detection
             self.previous_velocity = (new_pos[0] - old_pos[0], new_pos[1] - old_pos[1])
-
+         '''
     reward = reward_from_events(self, events)
     old_feats = state_to_features(old_game_state)
     new_feats = state_to_features(new_game_state)
@@ -334,7 +337,7 @@ def reward_from_events(self, events: List[str]) -> float:
     }
     shaping_rewards = {
 
-        e.REVERSED_DIRECTION: -0.2,
+        e.REVERSED_DIRECTION: 0.0,
 
         e.MOVED_CLOSE_TO_ENEMY: 0.00,
         e.MOVED_AWAY_FROM_ENEMY: 0.00,
@@ -342,7 +345,7 @@ def reward_from_events(self, events: List[str]) -> float:
         e.IN_DANGER: -0.10,
         e.SAFE_WAIT: -0.00,
 
-        e.WAITED: -0.1,
+        e.WAITED: -0.01,
         e.INVALID_ACTION: 0.0,
         e.BOMB_DROPPED: 0.0,
         e.BOMB_EXPLODED: 0.0,
