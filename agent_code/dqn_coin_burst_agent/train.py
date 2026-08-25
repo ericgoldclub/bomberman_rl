@@ -191,13 +191,13 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
 def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
-        e.COIN_COLLECTED: 12,
+        e.COIN_COLLECTED: 20,
         e.COIN_FOUND: 10,
         e.CRATE_DESTROYED: 8,
         e.USEFUL_BOMB_DROPPED: 1,
         e.USELESS_BOMB_DROPPED: -5,
-        e.MOVED_CLOSE_TO_COIN: 3,
-        e.MOVED_AWAY_FROM_COIN: -2,
+        e.MOVED_CLOSE_TO_COIN: 7,
+        e.MOVED_AWAY_FROM_COIN: -5,
         e.MOVED_TOWARDS_CRATE: 1,
         e.MOVED_AWAY_FROM_CRATE: -1,
         e.INVALID_ACTION: -4,
