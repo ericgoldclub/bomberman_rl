@@ -29,26 +29,31 @@ class HybridDQN(nn.Module):
         super().__init__()
 
         self.cnn = nn.Sequential(
-            nn.Conv2d(board_channels, 16, kernel_size=3, padding=1),
+            nn.Conv2d(board_channels, 16, kernel_size=3, padding=1, stride=2),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Flatten()
         )
 
-        cnn_out = 32 * BOARD_SIZE * BOARD_SIZE  # Assuming BOARD_SIZE is defined elsewhere
+        cnn_out = 32 * 9 * 9  # Assuming BOARD_SIZE is defined elsewhere
 
-        self.head = nn.Sequential(
-            nn.Linear(cnn_out + vector_dim, 256),
+        self.mlp = nn.Sequential(
+            nn.Linear(vector_dim, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
             nn.Linear(128, output_dim)
         )
-
+        self.head = nn.Sequential(
+            nn.Linear(cnn_out + output_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, output_dim)
+        )
     def forward(self, board, vector):
         board_features = self.cnn(board)
-        combined = torch.cat((board_features, vector), dim=1)
+        vector_features = self.mlp(vector)
+        combined = torch.cat((board_features, vector_features), dim=1)
         return self.head(combined)
 
 def setup_training(self):
@@ -201,13 +206,17 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 self.position_history[-2] == self.position_history[-4]):
                 events.append(e.OSCILLATION)
 
+    
+
+    # Update counters and train only every n environment steps.
+    self.steps_done += 1
+    events.append(e.STEP_PENALTY)  # Add a small penalty for each step to encourage faster completion
     reward = reward_from_events(self, events)
+
     # Store transition
     if old_state is not None:
         self.replay_buffer.append(Transition(old_state, self_action, new_state, reward, valid_action_mask(new_game_state)))
 
-    # Update counters and train only every n environment steps.
-    self.steps_done += 1
     if self.steps_done % TRAIN_EVERY == 0:
         for _ in range(TRAINING_STEPS):
             optimize_model(self)
@@ -248,8 +257,9 @@ def reward_from_events(self, events: List[str]) -> int:
         e.INVALID_ACTION: -8,
         e.KILLED_SELF: -50,
         e.GOT_KILLED: -50,
-        e.WAITED: -10,
-        e.OSCILLATION: -10,
+        e.WAITED: -1,
+        e.OSCILLATION: -1,
+        #e.STEP_PENALTY: -0.1,  # Small penalty for each step to encourage faster completion
         }
     reward_sum = 0
     for event in events:

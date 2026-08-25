@@ -10,7 +10,7 @@ MOVEMENT_DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 DIRECTIONS = [*MOVEMENT_DIRECTIONS, (0, 0)]  # UP, RIGHT, DOWN, LEFT, WAIT
 
 BOARD_CHANNELS = 9
-VECTOR_DIM = 8
+VECTOR_DIM = 4
 BOARD_SIZE = 17
 
 BOMB_POWER = 3
@@ -173,7 +173,7 @@ def setup(self):
     """Setup called once when loading the agent."""
     # hyperparams for acting
     self.epsilon = 1.0
-    self.decay_const = 26000
+    self.decay_const = 16000
     # Load model if available
     try:
         from .train import HybridDQN
@@ -260,16 +260,19 @@ def state_to_features(game_state: dict) -> np.array:
         safe_neighbors.append(
             0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and field[nx, ny] == 0 and (nx, ny) not in danger and explosion_map[nx, ny] == 0)
 
+    coins = int(game_state['coins'].shape()[1])
+    
     vector = np.array([
-        coin_dx / BOARD_SIZE,
-        coin_dy / BOARD_SIZE,
-        crate_dx / BOARD_SIZE,
-        crate_dy / BOARD_SIZE,
+        #coin_dx / BOARD_SIZE,
+        #coin_dy / BOARD_SIZE,
+        #crate_dx / BOARD_SIZE,
+        #crate_dy / BOARD_SIZE,
         int(can_hit_crate_with_bomb(field, x, y)),
         int(bombs_left),
         is_in_danger,
         int(any(safe_neighbors))]
         , dtype=np.float32
+        coins / 
     )
 
     board = board_to_channels(game_state)
@@ -282,7 +285,7 @@ def act(self, game_state: dict) -> str:
     state = state_to_features(game_state)
     board, vector = state
 
-    self.logger.debug(f"Vector features: {vector}")
+    #self.logger.debug(f"Vector features: {vector}")
 
     mask = valid_action_mask(game_state)
     valid_actions = [action for action, valid in zip(ACTIONS, mask) if valid]
