@@ -10,6 +10,7 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-saved-model.pt")
 BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-model.pt")
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
+VERBOSE_TRAIN_LOGS = True
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -76,6 +77,7 @@ def setup(self):
     # Authoritative feature sizes used by train.py and act()
     self.grid_channels = 9
     self.scalar_size = 5
+    self.log_dqn_details = VERBOSE_TRAIN_LOGS
     # Grid size (COLS, ROWS) as used by the environment
     self.grid_size = (s.COLS, s.ROWS)
 
@@ -290,10 +292,11 @@ def act(self, game_state: dict) -> str:
                         if non_wait_candidates:
                             candidates = non_wait_candidates
                     chosen_action = random.choice(candidates)
-                self.logger.info(
-                    f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
-                    f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
-                )
+                if getattr(self, "log_dqn_details", False):
+                    self.logger.info(
+                        f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
+                        f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
+                    )
                 return chosen_action
 
         with torch.no_grad():
@@ -306,10 +309,11 @@ def act(self, game_state: dict) -> str:
             action_idx = int(q.argmax(dim=1).item())
             chosen_action = ACTIONS[action_idx]
             epsilon_value = self.get_epsilon() if hasattr(self, "get_epsilon") else 0.0
-            self.logger.info(
-                f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
-                f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon_value:.3f}"
-            )
+            if getattr(self, "log_dqn_details", False):
+                self.logger.info(
+                    f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
+                    f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon_value:.3f}"
+                )
             return chosen_action
     except Exception as exc:
         self.logger.warning("DQN act failed, falling back to table or random policy : %s", exc)
@@ -317,8 +321,9 @@ def act(self, game_state: dict) -> str:
         safe_actions = [a for a in valid_actions if not (a == 'BOMB' and _bomb_is_unsafe(game_state))]
         candidates = safe_actions if safe_actions else valid_actions
         chosen_action = random.choice(candidates) if candidates else 'WAIT'
-        self.logger.info(
-            f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
-            f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, fallback=random"
-        )
+        if getattr(self, "log_dqn_details", False):
+            self.logger.info(
+                f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
+                f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, fallback=random"
+            )
         return chosen_action

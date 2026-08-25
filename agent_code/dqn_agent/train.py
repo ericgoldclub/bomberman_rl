@@ -20,9 +20,9 @@ Transition = namedtuple('Transition', ('grid', 'scalar', 'action', 'next_grid', 
 BUFFER_SIZE = 3000
 BATCH_SIZE = 32
 GAMMA = 0.97
-LR = 1e-4
-TARGET_UPDATE = 500  # steps
-MIN_REPLAY_SIZE = 512
+LR = 1e-3
+TARGET_UPDATE = 512  # steps
+MIN_REPLAY_SIZE = 256
 TRAIN_EVERY_STEPS = 2
 
 
@@ -94,6 +94,7 @@ def setup_training(self):
     self.round_coins_collected = 0
     self.best_round_coins = -1
     self.previous_old_position = None
+    self.position_history = deque(maxlen=4)
 
     # Determine sizes from self (set by callbacks.setup) or fall back to defaults
     C = getattr(self, 'grid_channels', 7)
@@ -119,7 +120,7 @@ def setup_training(self):
     # For convenience: keep epsilon parameters on self (can be tuned)
     self.epsilon_start = 1.0
     self.epsilon_end = 0.05
-    self.epsilon_decay = 30000/2
+    self.epsilon_decay = 30000
 
     # Attach a helper to compute current epsilon
     self.get_epsilon = lambda: self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-1.0 * self.steps_done / self.epsilon_decay)
@@ -177,11 +178,8 @@ def optimize_model(self):
     nn.utils.clip_grad_norm_(self.policy_net.parameters(), 5)
     self.optimizer.step()
 
-    # track loss value in log
-    try:
+    if getattr(self, "log_dqn_details", False):
         self.logger.info(f"loss={loss.item():.6f}")
-    except Exception:
-        pass
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -209,6 +207,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         if old_game_state is not None:
             old_pos = old_game_state["self"][-1]
             new_pos = new_game_state["self"][-1]
+
             if self_action in ('UP', 'RIGHT', 'DOWN', 'LEFT') and self.previous_old_position is not None:
                 if new_pos == self.previous_old_position:
                     events.append(e.REVISITED_PREVIOUS_TILE)
@@ -291,6 +290,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     self.round_coins_collected = 0
     self.previous_old_position = None
+    self.position_history.clear()
 
 
 def reward_from_events(self, events: List[str]) -> float:
@@ -326,13 +326,17 @@ def reward_from_events(self, events: List[str]) -> float:
         e.MOVED_AWAY_FROM_COIN: -0.08,
         e.MOVED_CLOSE_TO_ENEMY: -0.00,
         e.MOVED_AWAY_FROM_ENEMY: 0.00,
-        e.REVISITED_PREVIOUS_TILE: -0.5,
-        e.WAITED: -0.03,
+
+
+        e.IN_DANGER: -0.20,
         e.SAFE_WAIT: -0.06,
+        e.REVISITED_PREVIOUS_TILE: -0.09,
+
+
+        e.WAITED: -0.03,
         e.INVALID_ACTION: -0.12,
         e.BOMB_DROPPED: -0.15,
         e.BOMB_EXPLODED: 0.0,
-        e.IN_DANGER: -0.20,
         e.OPPONENT_ELIMINATED: 0.0,
         e.SURVIVED_ROUND: 0.0,
     }
@@ -344,16 +348,13 @@ def reward_from_events(self, events: List[str]) -> float:
         shaping_sum += shaping_rewards.get(event, 0.0)
 
     # Prevent step-wise shaping terms from overshadowing major outcomes.
-    shaping_sum = float(np.clip(shaping_sum, -0.3, 0.3))
-    reward_sum = major_sum + shaping_sum
+    shaping_sum = float(np.clip(shaping_sum, -0.25, 0.25))
+    reward_sum = major_sum + shaping_sum*0.8
 
-    # Log the reward (use info for traceability)
-    try:
+    if getattr(self, "log_dqn_details", False):
         self.logger.info(
             f"Awarded {reward_sum:.3f} (major={major_sum:.3f}, shaping={shaping_sum:.3f}) "
             f"for events {', '.join(events)}"
         )
-    except Exception:
-        pass
 
     return float(reward_sum)
