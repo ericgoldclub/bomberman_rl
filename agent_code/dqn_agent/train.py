@@ -326,7 +326,7 @@ def reward_from_events(self, events: List[str]) -> float:
         e.MOVED_AWAY_FROM_COIN: -0.08,
         e.MOVED_CLOSE_TO_ENEMY: -0.00,
         e.MOVED_AWAY_FROM_ENEMY: 0.00,
-        e.REVISITED_PREVIOUS_TILE: -0.5,
+        e.REVISITED_PREVIOUS_TILE: -1.0,
         e.WAITED: -0.03,
         e.SAFE_WAIT: -0.06,
         e.INVALID_ACTION: -0.12,
@@ -344,7 +344,7 @@ def reward_from_events(self, events: List[str]) -> float:
         shaping_sum += shaping_rewards.get(event, 0.0)
 
     # Prevent step-wise shaping terms from overshadowing major outcomes.
-    shaping_sum = float(np.clip(shaping_sum, -0.3, 0.3))
+    shaping_sum = float(np.clip(shaping_sum, -0.5, 0.5))
     reward_sum = major_sum + shaping_sum
 
     # Log the reward (use info for traceability)
