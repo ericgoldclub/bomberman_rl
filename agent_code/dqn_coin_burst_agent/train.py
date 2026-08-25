@@ -15,12 +15,12 @@ import events as e
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward', 'next_action_mask'))  # Added next_action to the Transition namedtuple
 
 # Hyperparameters
-BUFFER_SIZE = 10000
-BATCH_SIZE = 64
-GAMMA = 0.99
+BUFFER_SIZE = 3000
+BATCH_SIZE = 32
+GAMMA = 0.97
 LR = 1e-3
-TARGET_UPDATE = 1000  # steps
-MIN_REPLAY_SIZE = 500
+TARGET_UPDATE = 512  # steps
+MIN_REPLAY_SIZE = 256
 
 
 class HybridDQN(nn.Module):
