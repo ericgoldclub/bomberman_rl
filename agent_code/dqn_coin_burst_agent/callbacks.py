@@ -184,8 +184,13 @@ def setup(self):
         if not self.train and os.path.isfile(MODEL_FILE):
             self.logger.info("Loading DQN model from disk.")
             state = torch.load(MODEL_FILE, map_location=self.device)
-            self.policy_net.load_state_dict(state)
-            self.target_net.load_state_dict(state)
+
+            if isinstance(state, dict) and 'model_state_dict' in state:
+                state = state['model_state_dict']
+                
+            self.policy_net.load_state_dict(state['model_state_dict'])
+            self.target_net.load_state_dict(state['model_state_dict'])
+            self.steps_done = state.get('steps_done', 0)
             self.policy_net.eval()
             self.target_net.eval()
         else:
@@ -281,7 +286,7 @@ def act(self, game_state: dict) -> str:
     epsilon = self.epsilon if self.train else 0.0
 
     if self.train and hasattr(self, 'steps_done'):
-        epsilon = max(0.05, self.epsilon * (0.9995 ** self.steps_done))
+        epsilon = max(0.05, self.epsilon * (0.998 ** self.steps_done))
 
     logging.getLogger('BombeRLeWorld').info(
         f'Agent <dqn_coin_burst_agent> current epsilon {epsilon:.4f}'

@@ -9,10 +9,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BOARD_CHANNELS, VECTOR_DIM, BOARD_SIZE
+from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BOARD_CHANNELS, VECTOR_DIM, BOARD_SIZE, useful_bomb_positions, valid_action_mask
 import events as e
 
-Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
+Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward', 'next_action_mask'))  # Added next_action to the Transition namedtuple
 
 # Hyperparameters
 BUFFER_SIZE = 10000
@@ -38,9 +38,7 @@ class HybridDQN(nn.Module):
         cnn_out = 64 * BOARD_SIZE * BOARD_SIZE  # Assuming BOARD_SIZE is defined elsewhere
 
         self.head = nn.Sequential(
-            nn.Linear(cnn_out + vector_dim, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
+            nn.Linear(cnn_out + vector_dim, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
@@ -56,19 +54,31 @@ def setup_training(self):
     """Initialise training-related objects for the agent."""
     # Replay buffer
     self.replay_buffer = deque(maxlen=BUFFER_SIZE)
-    self.steps_done = 0
-    self.policy_net = HybridDQN(board_channels=BOARD_CHANNELS, vector_dim=VECTOR_DIM, output_dim=len(ACTIONS))
-    self.target_net = HybridDQN(board_channels=BOARD_CHANNELS, vector_dim=VECTOR_DIM, output_dim=len(ACTIONS))
+    self.steps_done = 0#
+    self.position_history = deque(maxlen=4)  # Store the last 4 positions to detect oscillation
+    # Device
+    self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+
+    self.policy_net = HybridDQN(board_channels=BOARD_CHANNELS, vector_dim=VECTOR_DIM, output_dim=len(ACTIONS)).to(self.device)
+    self.target_net = HybridDQN(board_channels=BOARD_CHANNELS, vector_dim=VECTOR_DIM, output_dim=len(ACTIONS)).to(self.device)
+
+    if os.path.isfile(MODEL_FILE):
+        self.logger.info("Loading existing DQN model for continued training.")
+        state = torch.load(MODEL_FILE, map_location=self.device)
+        if isinstance(state, dict) and 'model_state_dict' in state:
+            self.policy_net.load_state_dict(state['model_state_dict'])
+            self.target_net.load_state_dict(state['model_state_dict'])
+            self.steps_done = state.get('steps_done', 0)
+        else:
+            self.policy_net.load_state_dict(state)
+            self.target_net.load_state_dict(state)
+
     self.target_net.load_state_dict(self.policy_net.state_dict())
     self.target_net.eval()
 
     self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LR)
     self.loss_fn = nn.MSELoss()
-
-    # Device
-    self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    self.policy_net.to(self.device)
-    self.target_net.to(self.device)
 
 
 
@@ -101,8 +111,16 @@ def optimize_model(self):
         if len(non_final_next_list) > 0:
             next_boards = torch.from_numpy(np.array([s[0] for s in non_final_next_list], dtype=np.float32)).to(self.device)
             next_vectors = torch.from_numpy(np.array([s[1] for s in non_final_next_list], dtype=np.float32)).to(self.device)
-            next_actions = self.policy_net(next_boards, next_vectors).argmax(1, keepdim=True)
-            next_q_values[non_final_mask] = self.target_net(next_boards, next_vectors).gather(1, next_actions)
+
+            next_masks = torch.from_numpy(np.array([b.next_action_mask for b in batch if b.next_state is not None], dtype=np.float32)).to(self.device)
+
+            next_policy_q_values = self.policy_net(next_boards, next_vectors)
+            next_policy_q_values[~(next_masks.bool())] = float('-inf')
+
+            next_actions = next_policy_q_values.argmax(dim=1, keepdim=True)
+
+            next_target_q_values = self.target_net(next_boards, next_vectors).gather(1, next_actions)
+            next_q_values[non_final_mask] = next_target_q_values
 
     # Compute expected Q values
     expected_q_values = rewards + (GAMMA * next_q_values)
@@ -123,33 +141,36 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     #did we move closer to a coin or further away from it?
     if old_state is not None and new_state is not None:
-        old_vector = old_state[1]
-        new_vector = new_state[1]
-        old_coin_dx, old_coin_dy = old_vector[0], old_vector[1]
-        new_coin_dx, new_coin_dy = new_vector[0], new_vector[1]
+        coins = new_game_state['coins']
+        old_pos = old_game_state['self'][3]
+        new_pos = new_game_state['self'][3]
 
-        old_coin_distance = np.sqrt(old_coin_dx**2 + old_coin_dy**2)
-        new_coin_distance = np.sqrt(new_coin_dx**2 + new_coin_dy**2)
+        if len(coins) > 0:
+            old_coin_distance = min([np.sqrt((coin[0] - old_pos[0])**2 + (coin[1] - old_pos[1])**2) for coin in coins])
+            new_coin_distance = min([np.sqrt((coin[0] - new_pos[0])**2 + (coin[1] - new_pos[1])**2) for coin in coins])
 
-        if new_coin_distance < old_coin_distance:
-            events.append(e.MOVED_CLOSE_TO_COIN)
-        elif new_coin_distance > old_coin_distance:
-            events.append(e.MOVED_AWAY_FROM_COIN)
+            if new_coin_distance < old_coin_distance:
+                events.append(e.MOVED_CLOSE_TO_COIN)
+            elif new_coin_distance > old_coin_distance:
+                events.append(e.MOVED_AWAY_FROM_COIN)
 
     #did we move closer to a crate or further away from it?
     if old_state is not None and new_state is not None:
-        old_vector = old_state[1]
-        new_vector = new_state[1]
-        old_crate_dx, old_crate_dy = old_vector[2], old_vector[3]
-        new_crate_dx, new_crate_dy = new_vector[2], new_vector[3]
+        old_pos = old_game_state['self'][3]
+        new_pos = new_game_state['self'][3]
 
-        old_crate_distance = np.sqrt(old_crate_dx**2 + old_crate_dy**2)
-        new_crate_distance = np.sqrt(new_crate_dx**2 + new_crate_dy**2)
+        old_targets = useful_bomb_positions(old_game_state["field"])
+        new_targets = useful_bomb_positions(new_game_state["field"])
 
-        if new_crate_distance < old_crate_distance:
-            events.append(e.MOVED_TOWARDS_CRATE)
-        elif new_crate_distance > old_crate_distance:
-            events.append(e.MOVED_AWAY_FROM_CRATE)
+        if old_targets and new_targets:
+            old_crate_distance = min([np.sqrt((target[0] - old_pos[0])**2 + (target[1] - old_pos[1])**2) for target in old_targets])
+            new_crate_distance = min([np.sqrt((target[0] - new_pos[0])**2 + (target[1] - new_pos[1])**2) for target in new_targets])
+
+
+            if new_crate_distance < old_crate_distance:
+                events.append(e.MOVED_TOWARDS_CRATE)
+            elif new_crate_distance > old_crate_distance:
+                events.append(e.MOVED_AWAY_FROM_CRATE)
 
     if self_action == 'BOMB':
         if old_state is not None and old_state[1][4] == 1:  # can destroy crate
@@ -157,11 +178,32 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         else:
             events.append(e.USELESS_BOMB_DROPPED)
 
-    reward = reward_from_events(self, events)
+    
 
+    #check for oscillation A -> B -> A -> B
+    if old_state is not None and new_state is not None:
+        old_pos = old_game_state['self'][3]
+        new_pos = new_game_state['self'][3]
+
+        if not hasattr(self, 'position_history'):
+            self.position_history = deque(maxlen=4)
+
+        self.position_history.append(new_pos)
+
+        if len(self.position_history) >= 3:
+            # Check if the last four positions form an oscillation pattern
+            if (self.position_history[-1] == self.position_history[-3]):                events.append(e.OSCILLATION)
+
+        if len(self.position_history) >= 4:
+            # Check if the last four positions form an oscillation pattern
+            if (self.position_history[-1] == self.position_history[-3] and
+                self.position_history[-2] == self.position_history[-4]):
+                events.append(e.OSCILLATION)
+
+    reward = reward_from_events(self, events)
     # Store transition
     if old_state is not None:
-        self.replay_buffer.append(Transition(old_state, self_action, new_state, reward))
+        self.replay_buffer.append(Transition(old_state, self_action, new_state, reward, valid_action_mask(new_game_state)))
 
     # Perform optimization step
     optimize_model(self)
@@ -178,7 +220,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     reward = reward_from_events(self, events)
     # terminal state: next_state is None
     if last_state is not None:
-        self.replay_buffer.append(Transition(last_state, last_action, None, reward))
+        self.replay_buffer.append(Transition(last_state, last_action, None, reward, None ))
 
     # Do some final optimization passes
     for _ in range(10):
@@ -186,25 +228,25 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     # Save the policy network
     os.makedirs(os.path.dirname(MODEL_FILE), exist_ok=True)
-    torch.save(self.policy_net.state_dict(), MODEL_FILE)
+    torch.save({"model_state_dict": self.policy_net.state_dict(), "steps_done": self.steps_done}, MODEL_FILE)
 
 
 def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
-        e.COIN_COLLECTED: 20,
+        e.COIN_COLLECTED: 50,
         e.COIN_FOUND: 10,
-        e.CRATE_DESTROYED: 8,
-        e.USEFUL_BOMB_DROPPED: 1,
-        e.USELESS_BOMB_DROPPED: -5,
-        e.MOVED_CLOSE_TO_COIN: 7,
-        e.MOVED_AWAY_FROM_COIN: -5,
-        e.MOVED_TOWARDS_CRATE: 1,
-        e.MOVED_AWAY_FROM_CRATE: -1,
-        e.INVALID_ACTION: -4,
-        e.KILLED_SELF: -40,
-        e.GOT_KILLED: -40,
-        e.WAITED: -3,
-
+        e.CRATE_DESTROYED: 0,
+        e.USEFUL_BOMB_DROPPED: 0,
+        e.USELESS_BOMB_DROPPED: -2,
+        e.MOVED_CLOSE_TO_COIN: 3,
+        e.MOVED_AWAY_FROM_COIN: -4,
+        e.MOVED_TOWARDS_CRATE: 0,
+        e.MOVED_AWAY_FROM_CRATE: 0 ,
+        e.INVALID_ACTION: -8,
+        e.KILLED_SELF: -50,
+        e.GOT_KILLED: -50,
+        e.WAITED: -5,
+        e.OSCILLATION: -8,
         }
     reward_sum = 0
     for event in events:
