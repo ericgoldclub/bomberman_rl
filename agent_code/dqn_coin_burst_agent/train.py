@@ -16,26 +16,27 @@ Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'
 
 # Hyperparameters
 BUFFER_SIZE = 3000
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 GAMMA = 0.97
 LR = 1e-3
-TARGET_UPDATE = 512  # steps
+TARGET_UPDATE = 8012  # steps
 MIN_REPLAY_SIZE = 256
-
+TRAINING_STEPS = 4
+TRAIN_EVERY = 4
 
 class HybridDQN(nn.Module):
     def __init__(self, board_channels, vector_dim, output_dim):
         super().__init__()
 
         self.cnn = nn.Sequential(
-            nn.Conv2d(board_channels, 32, kernel_size=3, padding=1),
+            nn.Conv2d(board_channels, 16, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Flatten()
         )
 
-        cnn_out = 64 * BOARD_SIZE * BOARD_SIZE  # Assuming BOARD_SIZE is defined elsewhere
+        cnn_out = 32 * BOARD_SIZE * BOARD_SIZE  # Assuming BOARD_SIZE is defined elsewhere
 
         self.head = nn.Sequential(
             nn.Linear(cnn_out + vector_dim, 256),
@@ -205,11 +206,13 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if old_state is not None:
         self.replay_buffer.append(Transition(old_state, self_action, new_state, reward, valid_action_mask(new_game_state)))
 
-    # Perform optimization step
-    optimize_model(self)
+    # Update counters and train only every n environment steps.
+    self.steps_done += 1
+    if self.steps_done % TRAIN_EVERY == 0:
+        for _ in range(TRAINING_STEPS):
+            optimize_model(self)
 
     # Update target network periodically
-    self.steps_done += 1
     if self.steps_done % TARGET_UPDATE == 0:
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
@@ -235,18 +238,18 @@ def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
         e.COIN_COLLECTED: 50,
         e.COIN_FOUND: 10,
-        e.CRATE_DESTROYED: 0,
-        e.USEFUL_BOMB_DROPPED: 0,
+        e.CRATE_DESTROYED: 1,
+        e.USEFUL_BOMB_DROPPED: 2,
         e.USELESS_BOMB_DROPPED: -2,
-        e.MOVED_CLOSE_TO_COIN: 3,
-        e.MOVED_AWAY_FROM_COIN: -4,
-        e.MOVED_TOWARDS_CRATE: 0,
-        e.MOVED_AWAY_FROM_CRATE: 0 ,
+        #e.MOVED_CLOSE_TO_COIN: 5,
+        #e.MOVED_AWAY_FROM_COIN: -5,
+        #e.MOVED_TOWARDS_CRATE: 0,
+        #e.MOVED_AWAY_FROM_CRATE: 0 ,
         e.INVALID_ACTION: -8,
         e.KILLED_SELF: -50,
         e.GOT_KILLED: -50,
-        e.WAITED: -5,
-        e.OSCILLATION: -8,
+        e.WAITED: -10,
+        e.OSCILLATION: -10,
         }
     reward_sum = 0
     for event in events:

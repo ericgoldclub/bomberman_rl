@@ -173,6 +173,7 @@ def setup(self):
     """Setup called once when loading the agent."""
     # hyperparams for acting
     self.epsilon = 1.0
+    self.decay_const = 26000
     # Load model if available
     try:
         from .train import HybridDQN
@@ -187,7 +188,7 @@ def setup(self):
 
             if isinstance(state, dict) and 'model_state_dict' in state:
                 state = state['model_state_dict']
-                
+
             self.policy_net.load_state_dict(state['model_state_dict'])
             self.target_net.load_state_dict(state['model_state_dict'])
             self.steps_done = state.get('steps_done', 0)
@@ -286,7 +287,7 @@ def act(self, game_state: dict) -> str:
     epsilon = self.epsilon if self.train else 0.0
 
     if self.train and hasattr(self, 'steps_done'):
-        epsilon = max(0.05, self.epsilon * (0.998 ** self.steps_done))
+        epsilon = 0.05 + (1-0.05)*np.exp(-self.steps_done/self.decay_const)
 
     logging.getLogger('BombeRLeWorld').info(
         f'Agent <dqn_coin_burst_agent> current epsilon {epsilon:.4f}'
