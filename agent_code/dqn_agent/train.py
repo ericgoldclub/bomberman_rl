@@ -137,7 +137,7 @@ def setup_training(self):
     # For convenience: keep epsilon parameters on self (can be tuned)
     self.epsilon_start = 1.0
     self.epsilon_end = 0.05
-    self.epsilon_decay = 6830815
+    self.epsilon_decay = 514235
 
     # Attach a helper to compute current epsilon
     self.get_epsilon = lambda: self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-1.0 * self.steps_done / self.epsilon_decay)
@@ -208,8 +208,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     events = list(events)
-    #self.round_coins_collected += events.count(e.COIN_COLLECTED)
-    #self.round_number_kills += events.count(e.KILLED_OPPONENT)
+    self.round_coins_collected += events.count(e.COIN_COLLECTED)
+    self.round_number_kills += events.count(e.KILLED_OPPONENT)
     if new_game_state is not None:
         field = new_game_state["field"]
         explosion_map = new_game_state.get("explosion_map", np.zeros_like(field))
@@ -288,8 +288,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
-    self.round_coins_collected += events.count(e.COIN_COLLECTED)
-    self.round_number_kills += events.count(e.KILLED_OPPONENT)
+    #self.round_coins_collected += events.count(e.COIN_COLLECTED)
+    #self.round_number_kills += events.count(e.KILLED_OPPONENT)
     last_state = state_to_features(last_game_state)
     reward = reward_from_events(self, events)
     # terminal state: next_state is None
@@ -338,15 +338,14 @@ def reward_from_events(self, events: List[str]) -> float:
     # - shaping terms (movement heuristics), which are clipped per step
     major_rewards = {
         e.COIN_COLLECTED: 1.0,
-        
-        e.KILLED_OPPONENT: 2.0,
-        e.KILLED_SELF: -1.2,
+        e.KILLED_OPPONENT: 5.0,
+        e.KILLED_SELF: -5.0,
         e.GOT_KILLED: -5.0,
         e.COIN_FOUND: 0.10,
         e.OPPONENT_ELIMINATED: 1.0,
+        e.CRATE_DESTROYED: 0.6,
     }
     shaping_rewards = {
-        e.CRATE_DESTROYED: 0.2,
 
         e.REVERSED_DIRECTION: -0.05,
 
@@ -356,9 +355,9 @@ def reward_from_events(self, events: List[str]) -> float:
         e.IN_DANGER: -0.10,
         e.SAFE_WAIT: 0.00,
 
-        e.WAITED: 0.0,
+        e.WAITED: -0.05,
         e.INVALID_ACTION: 0.0,
-        e.BOMB_DROPPED: 0.0,
+        e.BOMB_DROPPED: 0.1,
         e.BOMB_EXPLODED: 0.0,
         e.SURVIVED_ROUND: 0.0,
     }
