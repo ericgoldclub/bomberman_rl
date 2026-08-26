@@ -4,13 +4,15 @@ import logging
 
 import numpy as np
 
+from collections import deque
+
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-coin-burst-saved-model.pt")
 MOVEMENT_DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 DIRECTIONS = [*MOVEMENT_DIRECTIONS, (0, 0)]  # UP, RIGHT, DOWN, LEFT, WAIT
 
 BOARD_CHANNELS = 9
-VECTOR_DIM = 8
+VECTOR_DIM = 12
 BOARD_SIZE = 17
 
 BOMB_POWER = 3
@@ -173,7 +175,8 @@ def setup(self):
     """Setup called once when loading the agent."""
     # hyperparams for acting
     self.epsilon = 1.0
-    self.decay_const = 16000
+    self.decay_const = 36000
+    self.position_history = deque(maxlen=4)
     # Load model if available
     try:
         from .train import HybridDQN
@@ -227,7 +230,7 @@ def useful_bomb_positions(field):
         if field[x, y] == 0 and can_hit_crate_with_bomb(field, x, y)
     ]
 
-def state_to_features(game_state: dict) -> np.array:
+def state_to_features(game_state: dict, position_history=None) -> np.array:
     if game_state is None:
         return None
 
@@ -260,6 +263,19 @@ def state_to_features(game_state: dict) -> np.array:
         safe_neighbors.append(
             0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and field[nx, ny] == 0 and (nx, ny) not in danger and explosion_map[nx, ny] == 0)
 
+    prev_dx, prev_dy = 0, 0
+    two_back_dx, two_back_dy = 0, 0
+
+    if position_history is not None and len(position_history) >= 2:
+        px, py = position_history[-2]
+        prev_dx = (px - x) / BOARD_SIZE
+        prev_dy = (py - y) / BOARD_SIZE
+
+    if position_history is not None and len(position_history) >= 3:
+        tx, ty = position_history[-3]
+        two_back_dx = (tx - x) / BOARD_SIZE
+        two_back_dy = (ty - y) / BOARD_SIZE
+
     
     
     vector = np.array([
@@ -270,9 +286,12 @@ def state_to_features(game_state: dict) -> np.array:
         int(can_hit_crate_with_bomb(field, x, y)),
         int(bombs_left),
         is_in_danger,
-        int(any(safe_neighbors))]
-        , dtype=np.float32
-    )
+        int(any(safe_neighbors)),
+        prev_dx,
+        prev_dy,
+        two_back_dx,
+        two_back_dy,
+    ], dtype=np.float32)
 
     board = board_to_channels(game_state)
 
@@ -281,7 +300,15 @@ def state_to_features(game_state: dict) -> np.array:
 
 
 def act(self, game_state: dict) -> str:
-    state = state_to_features(game_state)
+    _, _, _, current_pos = game_state["self"]
+
+    if not hasattr(self, "position_history"):
+        self.position_history = deque(maxlen=4)
+
+    if len(self.position_history) == 0 or self.position_history[-1] != current_pos:
+        self.position_history.append(current_pos)
+
+    state = state_to_features(game_state, self.position_history)
     board, vector = state
 
     #self.logger.debug(f"Vector features: {vector}")
