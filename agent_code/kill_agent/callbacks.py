@@ -6,13 +6,15 @@ import numpy as np
 
 from collections import deque
 
+from agent_code.dqn_coin_burst_agent.callbacks import can_hit_crate_with_bomb
+
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
-MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-coin-burst-saved-model.pt")
+MODEL_FILE = os.path.join(os.path.dirname(__file__), "kill_agent_saved_model.pt")
 MOVEMENT_DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 DIRECTIONS = [*MOVEMENT_DIRECTIONS, (0, 0)]  # UP, RIGHT, DOWN, LEFT, WAIT
 
 BOARD_CHANNELS = 9
-VECTOR_DIM = 12
+VECTOR_DIM = 13
 BOARD_SIZE = 17
 
 BOMB_POWER = 3
@@ -30,8 +32,20 @@ def valid_action_mask(game_state):
 
     for i, action in enumerate(ACTIONS):
         if action == 'BOMB':
-            mask[i] = bombs_left and can_hit_crate_with_bomb(field, x, y)
+            mask[i] = bool(
+                bombs_left
+                and (
+                    can_hit_crate_with_bomb(field, x, y)
+                    or can_hit_enemy_with_bomb(
+                        field,
+                        x,
+                        y,
+                        [pos for _, _, _, pos in game_state["others"]]
+                    )
+                )
+            )
             continue
+            
 
         if action == 'WAIT':
             mask[i] = not ((x, y) in danger or explosion_map[x, y] > 0)
@@ -99,6 +113,10 @@ def bomb_danger_tiles(field, bombs, bomb_power=BOMB_POWER):
                 if field[nx, ny] == 1:
                     break
     return danger
+
+
+
+
 
 def board_to_channels(game_state):
     field = game_state["field"]
@@ -175,7 +193,7 @@ def setup(self):
     """Setup called once when loading the agent."""
     # hyperparams for acting
     self.epsilon = 1.0
-    self.decay_const = 260000
+    self.decay_const = 500000
     self.position_history = deque(maxlen=4)
     # Load model if available
     try:
@@ -221,6 +239,20 @@ def can_hit_crate_with_bomb(field, x, y, bomb_power=BOMB_POWER):
 
     return False
 
+def can_hit_enemy_with_bomb(field, x, y, enemies, bomb_power=BOMB_POWER):
+    for dx, dy in MOVEMENT_DIRECTIONS:
+        for distance in range(1, bomb_power + 1):
+            nx = x + dx * distance
+            ny = y + dy * distance
+
+            if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
+                break
+            if field[nx, ny] == -1:
+                break
+            if (nx, ny) in enemies:
+                return True
+
+    return False
 
 
 def useful_bomb_positions(field):
@@ -277,6 +309,8 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
         two_back_dx = (tx - x) / BOARD_SIZE
         two_back_dy = (ty - y) / BOARD_SIZE
 
+    steps = game_state.get("steps", 0)
+    
     vector = np.array([
         coin_dx / BOARD_SIZE,
         coin_dy / BOARD_SIZE,
@@ -290,6 +324,8 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
         prev_dy,
         two_back_dx,
         two_back_dy,
+        steps/400,
+        #int(can_hit_enemy_with_bomb(field, x, y, [pos for _, _, _, pos in game_state["others"]]))
     ], dtype=np.float32)
 
     board = board_to_channels(game_state)

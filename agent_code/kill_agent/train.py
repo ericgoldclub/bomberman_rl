@@ -207,7 +207,30 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 self.position_history[-2] == self.position_history[-4]):
                 events.append(e.OSCILLATION)
 
-    
+    #check for enemy proximity
+    if old_state is not None and new_state is not None:
+        old_pos = old_game_state['self'][3]
+        new_pos = new_game_state['self'][3]
+
+        old_enemy_distances = [
+            np.sqrt((enemy[3][0] - old_pos[0])**2 + (enemy[3][1] - old_pos[1])**2)
+            for enemy in old_game_state['others']
+            if enemy[3] is not None
+        ]
+        new_enemy_distances = [
+            np.sqrt((enemy[3][0] - new_pos[0])**2 + (enemy[3][1] - new_pos[1])**2)
+            for enemy in new_game_state['others']
+            if enemy[3] is not None
+        ]
+
+        if old_enemy_distances and new_enemy_distances:
+            old_enemy_distance = min(old_enemy_distances)
+            new_enemy_distance = min(new_enemy_distances)
+
+            if new_enemy_distance < old_enemy_distance:
+                events.append(e.MOVED_CLOSE_TO_ENEMY)
+            elif new_enemy_distance > old_enemy_distance:
+                events.append(e.MOVED_AWAY_FROM_ENEMY)
 
     # Update counters and train only every n environment steps.
     self.steps_done += 1
@@ -246,18 +269,22 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
 def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
-        e.COIN_COLLECTED: 50,
+        e.COIN_COLLECTED: 30,
+        e.BOMB_DROPPED: 10,
+        e.KILLED_OPPONENT: 100,
+        e.MOVED_CLOSE_TO_ENEMY: 5,
+        e.MOVED_AWAY_FROM_ENEMY: -5,
         #e.COIN_FOUND: 10,
         #e.CRATE_DESTROYED: 1,
         #e.USEFUL_BOMB_DROPPED: 2,
         #e.USELESS_BOMB_DROPPED: -2,
-        e.MOVED_CLOSE_TO_COIN: 5,
-        e.MOVED_AWAY_FROM_COIN: -5,
+        e.MOVED_CLOSE_TO_COIN: 2,
+        e.MOVED_AWAY_FROM_COIN: -2,
         #e.MOVED_TOWARDS_CRATE: 0,
         #e.MOVED_AWAY_FROM_CRATE: 0 ,
         e.INVALID_ACTION: -8,
-        #e.KILLED_SELF: -50,
-        #e.GOT_KILLED: -50,
+        e.KILLED_SELF: -50,
+        e.GOT_KILLED: -50,
         e.WAITED: -5,
         e.OSCILLATION: -5,
         e.STEP_PENALTY: -0.2,  # Small penalty for each step to encourage faster completion
