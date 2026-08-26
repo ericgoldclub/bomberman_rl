@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BEST_MODEL_FILE, _feature_dimensions, _is_valid_action, _policy_action_mask
+from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BEST_MODEL_FILE, TRAINING_MODEL_FILE, _feature_dimensions, _is_valid_action, _policy_action_mask
 import events as e
 import settings as s
 
@@ -95,7 +95,8 @@ def setup_training(self):
     self.replay_buffer = deque(maxlen=BUFFER_SIZE)
     self.steps_done = 0
     self.round_coins_collected = 0
-    self.best_round_coins = -1
+    self.round_number_kills = 0
+    self.best_score = -1
     self.previous_old_position = None
     self.previous_velocity = (0,0)
     self.position_history = deque(maxlen=4)
@@ -112,6 +113,14 @@ def setup_training(self):
     # Instantiate networks if not already present
     if not hasattr(self, 'policy_net'):
         self.policy_net = DQN(in_channels=C, grid_size=(H, W), scalar_size=S, n_actions=len(ACTIONS))
+    self.logger.info( "Training checkpoint source path=%s exists=%s",
+        TRAINING_MODEL_FILE,
+        os.path.isfile(TRAINING_MODEL_FILE),
+    )
+    if os.path.isfile(TRAINING_MODEL_FILE):
+        load_device = getattr(self, 'device', torch.device("cpu"))
+        self.policy_net.load_state_dict(torch.load(TRAINING_MODEL_FILE, map_location=load_device))
+        self.logger.info("Loaded training checkpoint from %s", TRAINING_MODEL_FILE)
     if not hasattr(self, 'target_net'):
         self.target_net = DQN(in_channels=C, grid_size=(H, W), scalar_size=S, n_actions=len(ACTIONS))
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -128,7 +137,7 @@ def setup_training(self):
     # For convenience: keep epsilon parameters on self (can be tuned)
     self.epsilon_start = 1.0
     self.epsilon_end = 0.05
-    self.epsilon_decay = 683082
+    self.epsilon_decay = 6830815
 
     # Attach a helper to compute current epsilon
     self.get_epsilon = lambda: self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-1.0 * self.steps_done / self.epsilon_decay)
@@ -199,7 +208,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     events = list(events)
-    self.round_coins_collected += events.count(e.COIN_COLLECTED)
+    #self.round_coins_collected += events.count(e.COIN_COLLECTED)
+    #self.round_number_kills += events.count(e.KILLED_OPPONENT)
     if new_game_state is not None:
         field = new_game_state["field"]
         explosion_map = new_game_state.get("explosion_map", np.zeros_like(field))
@@ -279,6 +289,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
     self.round_coins_collected += events.count(e.COIN_COLLECTED)
+    self.round_number_kills += events.count(e.KILLED_OPPONENT)
     last_state = state_to_features(last_game_state)
     reward = reward_from_events(self, events)
     # terminal state: next_state is None
@@ -290,19 +301,21 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     for _ in range(10):
         optimize_model(self)
 
-    # Save latest policy network
+    # Save latest policy network to MODEL_FILE; TRAINING_MODEL_FILE is the read-only start checkpoint
     os.makedirs(os.path.dirname(MODEL_FILE), exist_ok=True)
     torch.save(self.policy_net.state_dict(), MODEL_FILE)
 
-    if self.round_coins_collected > self.best_round_coins:
-        self.best_round_coins = self.round_coins_collected
+    current_score = self.round_coins_collected + self.round_number_kills * 5
+    if current_score > self.best_score:
+        self.best_score = current_score
         torch.save(self.policy_net.state_dict(), BEST_MODEL_FILE)
         self.logger.info(
-            "Saved new best model with %d collected coins.",
-            self.round_coins_collected,
+            "Saved new best model with score %d.",
+            current_score,
         )
 
     self.round_coins_collected = 0
+    self.round_number_kills = 0
     self.previous_old_position = None
     self.position_history.clear()
 

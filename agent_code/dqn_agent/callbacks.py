@@ -9,7 +9,8 @@ import settings as s
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-saved-model.pt")
-BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-coin-collector.pt")
+BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-model.pt")
+TRAINING_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-coin-collector.pt")
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
 VERBOSE_TRAIN_LOGS = True
 MAX_OPPONENT_SLOTS = 3
@@ -104,12 +105,26 @@ def setup(self):
             n_actions=len(ACTIONS),
         ).to(self.device)
 
-        load_path = BEST_MODEL_FILE if os.path.isfile(BEST_MODEL_FILE) else MODEL_FILE
+        if self.train:
+            load_path = TRAINING_MODEL_FILE
+        elif os.path.isfile(BEST_MODEL_FILE):
+            load_path = BEST_MODEL_FILE
+        else:
+            load_path = MODEL_FILE
+        self.logger.info(
+            "Model selection mode=%s path=%s exists=%s",
+            "train" if self.train else "eval",
+            load_path,
+            os.path.isfile(load_path),
+        )
         if os.path.isfile(load_path):
             self.policy_net.load_state_dict(torch.load(load_path, map_location=self.device))
             self.logger.info("Loaded DQN model from %s", load_path)
         else:
-            self.logger.warning("No saved DQN model found; using freshly initialized policy network.")
+            if self.train:
+                self.logger.warning("No training checkpoint at %s; using freshly initialized policy network.", TRAINING_MODEL_FILE)
+            else:
+                self.logger.warning("No saved DQN model found; using freshly initialized policy network.")
 
         self.policy_net.eval()
     except Exception as exc:
