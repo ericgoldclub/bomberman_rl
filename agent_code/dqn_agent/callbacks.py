@@ -9,7 +9,7 @@ import settings as s
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-saved-model.pt")
-BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-model.pt")
+BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-coin-collector.pt")
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
 VERBOSE_TRAIN_LOGS = True
 MAX_OPPONENT_SLOTS = 3
