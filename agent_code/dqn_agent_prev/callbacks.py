@@ -419,7 +419,6 @@ def state_to_features(game_state: dict) -> np.array:
         crate_penalty=TACTICAL_CRATE_PENALTY,
     )
 
-    '''
     if len(coins) == 0:
         coin_count_normalized = 0.0
         #dist_coin = 0.0
@@ -427,13 +426,11 @@ def state_to_features(game_state: dict) -> np.array:
         coin_count_normalized = min(1.0, float(len(coins)) / float(max(1, H * W)))
         coin_costs = [tactical_cost_map[cx, cy] for cx, cy in coins]
         valid_coin_costs = [c for c in coin_costs if np.isfinite(c)]
-       
+        '''
         dist_coin = _normalize_distance(
             int(min(valid_coin_costs)) if valid_coin_costs else None,
             distance_normalizer,
         )'''
-
-    coin_count_normalized = len(coins)  
 
     time_remaining = 1.0 - (game_state["step"] / float(s.MAX_STEPS))
     enemy_features = []
