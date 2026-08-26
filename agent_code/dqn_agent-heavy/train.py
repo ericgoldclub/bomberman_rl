@@ -10,80 +10,86 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BEST_MODEL_FILE, _is_valid_action
+from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BEST_MODEL_FILE, _feature_dimensions, _is_valid_action, _policy_action_mask
 import events as e
 import settings as s
 
-Transition = namedtuple('Transition', ('grid', 'scalar', 'action', 'next_grid', 'next_scalar', 'reward'))
+Transition = namedtuple('Transition', ('grid', 'scalar', 'action', 'next_grid', 'next_scalar', 'next_action_mask', 'reward'))
 
 # Hyperparameters
-BUFFER_SIZE = 3000
-BATCH_SIZE = 32
-GAMMA = 0.97
+BUFFER_SIZE = 100_000
+BATCH_SIZE = 64
+GAMMA = 0.99
 LR = 1e-4
-TARGET_UPDATE = 500  # steps
-MIN_REPLAY_SIZE = 256
-TRAIN_EVERY_STEPS = 2
+TARGET_UPDATE = 8192  # steps
+MIN_REPLAY_SIZE = 5000
+TRAIN_EVERY_STEPS = 8
 
 
 class DQN(nn.Module):
     '''
-    The model combines a small CNN for grid channels with a MLP for scalar features, 
-    such as (x, y) coordinates of the agent and the direction to the nearest coin. 
+    The model combines a small CNN for grid channels with a MLP for scalar features,
+    such as bomb availability, target distances, and remaining time.
     The outputs are Q-values for each action.
     '''
     def __init__(self, in_channels : int, grid_size: tuple[int, int] , scalar_size : int, n_actions : int):
         super().__init__()
-        H, W = grid_size
-
         # CNN for grid channels
-        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size = 3, padding = 1)
-        self.conv2 = nn.Conv2d(32, 32, kernel_size = 3, padding = 1)
-        # Keep coarse spatial information for navigation-sensitive decisions.
-        pooled_h, pooled_w = 10, 10
-        self.max_pool = nn.AdaptiveMaxPool2d((pooled_h, pooled_w))
-        self.avg_pool = nn.AdaptiveAvgPool2d((pooled_h, pooled_w))
-        # Mixed pooling concatenates max and average features, doubling channels.
-        cnn_out_dim = (32 * 2) * pooled_h * pooled_w
+        self.cnn = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+
+            nn.Conv2d(64,128, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+        )
+        
+        with torch.no_grad():
+            dummy = torch.zeros(1, in_channels, grid_size[0], grid_size[1])
+            cnn_out_dim = int(self.cnn(dummy).flatten(1).shape[1])
 
         # MLP for scalar features
         self.scalar_fc = nn.Sequential(
             nn.Linear(scalar_size, 32),
             nn.ReLU(),
             nn.Linear(32, 32),
-            nn.ReLU()
+            nn.ReLU(),
         )
 
         # Final MLP to combine CNN and scalar features
         combined_dim = cnn_out_dim + 32
-        self.head = nn.Sequential(
-            nn.Linear(combined_dim, 96),
+
+        self.shared = nn.Sequential(
+            nn.Linear(combined_dim, 128),
             nn.ReLU(),
-            nn.Linear(96, n_actions) # output Q-values for each action
+            nn.Linear(128, 64), # output Q-values for each action
+            nn.ReLU(),
         )
 
-        # initialize weights
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
+        self.value = nn.Linear(64, 1)  # V(s)
+        self.advantage = nn.Linear(64, n_actions)  # A(s,a)
+
 
     def forward(self, grid : torch.Tensor, scalar : torch.Tensor) -> torch.Tensor:
         # grid: (batch_size, in_channels, H, W)
         # scalar: (batch_size, scalar_size)
 
-        X = F.relu(self.conv1(grid))
-        X = F.relu(self.conv2(X))
-        mx = self.max_pool(X)  # (batch_size, 32, pooled_h, pooled_w)
-        avg = self.avg_pool(X)  # (batch_size, 32, pooled_h, pooled_w)
-        X = torch.cat([mx, avg], dim=1)  # (batch_size, 64, pooled_h, pooled_w)
-        X = X.view(X.size(0), -1)  # flatten
+        x = self.cnn(grid)  # (batch_size, 128, H', W')
+        x = torch.flatten(x, 1)
 
-        scalar_out = self.scalar_fc(scalar)  # (batch_size, 32)
-        combined = torch.cat([X, scalar_out], dim=1)  # (batch_size, combined_dim)
-        Q = self.head(combined)  # (batch_size, n_actions)
-        
+        s = self.scalar_fc(scalar)  # (batch_size, 32)
+
+        x = torch.cat([x,s], dim=1)  # (batch_size, combined_dim)
+
+        x = self.shared(x)
+
+        value = self.value(x)  # (batch_size, 1)
+        advantage = self.advantage(x)  # (batch_size, n_actions)
+
+        Q = value + advantage - advantage.mean(dim=1, keepdim=True)  # (batch_size, n_actions)
+
         return Q
 
 def setup_training(self):
@@ -93,11 +99,18 @@ def setup_training(self):
     self.steps_done = 0
     self.round_coins_collected = 0
     self.best_round_coins = -1
+    self.previous_old_position = None
+    self.previous_velocity = (0,0)
+    self.position_history = deque(maxlen=4)
 
-    # Determine sizes from self (set by callbacks.setup) or fall back to defaults
-    C = getattr(self, 'grid_channels', 7)
+    # Determine sizes from self (set by callbacks.setup) or infer them from the feature extractor.
+    C = getattr(self, 'grid_channels', None)
+    if C is None:
+        C, _ = _feature_dimensions()
     H, W = getattr(self, 'grid_size', (17, 17))
-    S = getattr(self, 'scalar_size', 5)
+    S = getattr(self, 'scalar_size', None)
+    if S is None:
+        _, S = _feature_dimensions()
 
     # Instantiate networks if not already present
     if not hasattr(self, 'policy_net'):
@@ -116,9 +129,9 @@ def setup_training(self):
     self.target_net.to(self.device)
 
     # For convenience: keep epsilon parameters on self (can be tuned)
-    self.epsilon_start = 1.0*0
+    self.epsilon_start = 1.0
     self.epsilon_end = 0.05
-    self.epsilon_decay = 30000/2
+    self.epsilon_decay = 1036579
 
     # Attach a helper to compute current epsilon
     self.get_epsilon = lambda: self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-1.0 * self.steps_done / self.epsilon_decay)
@@ -139,6 +152,7 @@ def optimize_model(self):
     non_final_next_grid_np = np.stack([b.next_grid for b in batch if b.next_grid is not None], axis=0) if non_final_mask_np.any() else np.empty((0, states_grid.shape[1], states_grid.shape[2], states_grid.shape[3]), dtype=np.float32)
 
     non_final_next_scalar_np = np.stack([b.next_scalar for b in batch if b.next_scalar is not None], axis=0) if non_final_mask_np.any() else np.empty((0, states_scalar.shape[1]), dtype=np.float32)
+    non_final_next_action_mask_np = np.stack([b.next_action_mask for b in batch if b.next_action_mask is not None], axis=0) if non_final_mask_np.any() else np.empty((0, len(ACTIONS)), dtype=bool)
 
     # Convert to torch tensors
 
@@ -150,24 +164,26 @@ def optimize_model(self):
     nonfinal_next_grid = torch.from_numpy(non_final_next_grid_np.astype(np.float32)).to(self.device) if non_final_next_grid_np.size else torch.empty((0, states_grid.shape[1], states_grid.shape[2], states_grid.shape[3]), device=self.device)
 
     nonfinal_next_scalar = torch.from_numpy(non_final_next_scalar_np.astype(np.float32)).to(self.device) if non_final_next_scalar_np.size else torch.empty((0, states_scalar.shape[1]), device=self.device)
+    nonfinal_next_action_mask = torch.from_numpy(non_final_next_action_mask_np.astype(np.bool_)).to(self.device) if non_final_next_action_mask_np.size else torch.empty((0, len(ACTIONS)), dtype=torch.bool, device=self.device)
 
     # Compute Q(s_t, a)
     q_values_all = self.policy_net(states_grid, states_scalar) # (B, n_actions)
     q_values = q_values_all.gather(1, actions) # (B, 1)
 
-    # Double DQN target evaluation 
+    # Double DQN target evaluation
     next_q_values = torch.zeros((BATCH_SIZE, 1), device=self.device)
     if nonfinal_next_grid.size(0) > 0:
-        # Get the best actions from policy network 
-        next_policy_q = self.policy_net(nonfinal_next_grid, nonfinal_next_scalar) # (B', n_actions)
-        next_actions = next_policy_q.argmax(dim=1, keepdim=True) # (B', 1)
-        # Evaluate these actions using target network
-        next_target_q = self.target_net(nonfinal_next_grid, nonfinal_next_scalar).gather(1, next_actions) # (B', 1)
+        with torch.no_grad():
+            next_policy_q = self.policy_net(nonfinal_next_grid, nonfinal_next_scalar) # (B', n_actions)
+            next_policy_q = next_policy_q.masked_fill(~nonfinal_next_action_mask, float('-inf'))
+            next_actions = next_policy_q.argmax(dim=1, keepdim=True) # (B', 1)
+            # Evaluate these actions using target network
+            next_target_q = self.target_net(nonfinal_next_grid, nonfinal_next_scalar).gather(1, next_actions) # (B', 1)
         # Assign next Q-values into the full batch tensor at indices of non-final transitions
         # Convert boolean mask to torch on device
         non_final_mask = torch.from_numpy(non_final_mask_np).to(self.device)
         # next_target_q has shape (N,1); place its values into next_q_values where mask is True
-        next_q_values[non_final_mask, 0] = next_target_q.squeeze(1).detach()
+        next_q_values[non_final_mask, 0] = next_target_q.squeeze(1)
 
     expected_q = rewards + (GAMMA * next_q_values)
     loss = self.loss_fn(q_values, expected_q)
@@ -176,11 +192,8 @@ def optimize_model(self):
     nn.utils.clip_grad_norm_(self.policy_net.parameters(), 5)
     self.optimizer.step()
 
-    # track loss value in log
-    try:
+    if getattr(self, "log_dqn_details", False):
         self.logger.info(f"loss={loss.item():.6f}")
-    except Exception:
-        pass
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -205,17 +218,35 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             if has_valid_move:
                 events.append(e.SAFE_WAIT)
 
-        if old_game_state is not None and old_game_state["coins"]:
+        if old_game_state is not None:
             old_pos = old_game_state["self"][-1]
             new_pos = new_game_state["self"][-1]
-            old_dists = [abs(old_pos[0] - cx) + abs(old_pos[1] - cy) for cx, cy in old_game_state["coins"]]
-            new_dists = [abs(new_pos[0] - cx) + abs(new_pos[1] - cy) for cx, cy in new_game_state["coins"]]
-            old_min = min(old_dists) if old_dists else 1e9
-            new_min = min(new_dists) if new_dists else 1e9
-            if new_min < old_min:
-                events.append(e.MOVED_CLOSE_TO_COIN)
-            elif new_min > old_min:
-                events.append(e.MOVED_AWAY_FROM_COIN)
+
+            current_velocity = (new_pos[0] - old_pos[0], new_pos[1] - old_pos[1])
+
+            previous_vx, previous_vy = self.previous_velocity
+            current_vx, current_vy = current_velocity
+
+            if (current_vx !=0 or current_vy !=0) and (previous_vx !=0 or previous_vy !=0):
+                skp = current_vx*previous_vx + current_vy*previous_vy
+                if skp < 0:
+                    events.append(e.REVERSED_DIRECTION)
+
+
+
+            old_others = [o[-1] for o in old_game_state["others"] if o[-1] is not None]
+            new_others = [o[-1] for o in new_game_state["others"] if o[-1] is not None]
+            if old_others and new_others:
+                old_enemy_min = min(abs(old_pos[0] - ox) + abs(old_pos[1] - oy) for ox, oy in old_others)
+                new_enemy_min = min(abs(new_pos[0] - ox) + abs(new_pos[1] - oy) for ox, oy in new_others)
+                if new_enemy_min < old_enemy_min:
+                    events.append(e.MOVED_CLOSE_TO_ENEMY)
+                elif new_enemy_min > old_enemy_min:
+                    events.append(e.MOVED_AWAY_FROM_ENEMY)
+
+            self.previous_old_position = old_pos
+            # Update velocity for next step's reversal detection
+            self.previous_velocity = (new_pos[0] - old_pos[0], new_pos[1] - old_pos[1])
 
     reward = reward_from_events(self, events)
     old_feats = state_to_features(old_game_state)
@@ -225,14 +256,17 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         old_grid, old_scalar = old_feats
         if new_feats is not None:
             new_grid, new_scalar = new_feats
+            next_action_mask = _policy_action_mask(new_game_state)
         else:
             new_grid, new_scalar = None, None
+            next_action_mask = None
 
         # store transition (use copies to avoid accidental mutation)
         self.replay_buffer.append(Transition(old_grid.copy(), old_scalar.copy(),
                                              self_action,
                                              None if new_grid is None else new_grid.copy(),
                                              None if new_scalar is None else new_scalar.copy(),
+                                             None if next_action_mask is None else next_action_mask.copy(),
                                              reward))
 
         # update step counter and train periodically to reduce compute cost
@@ -253,7 +287,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # terminal state: next_state is None
     if last_state is not None:
         last_grid, last_scalar = last_state
-        self.replay_buffer.append(Transition(last_grid.copy(), last_scalar.copy(), last_action, None, None, reward))
+        self.replay_buffer.append(Transition(last_grid.copy(), last_scalar.copy(), last_action, None, None, None, reward))
 
     # Do some final optimization passes
     for _ in range(10):
@@ -272,6 +306,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         )
 
     self.round_coins_collected = 0
+    self.previous_old_position = None
+    self.position_history.clear()
 
 
 def reward_from_events(self, events: List[str]) -> float:
@@ -287,32 +323,49 @@ def reward_from_events(self, events: List[str]) -> float:
     - Penalize meaningless waiting or invalid actions.
     - Reward eliminating opponents and surviving rounds.
     """
-    # Minimal reward set focused on coin collection.
-    game_rewards = {
-        e.COIN_COLLECTED: 20.0,
-        e.MOVED_CLOSE_TO_COIN: 1.0,
-        e.MOVED_AWAY_FROM_COIN: -1.0,
-        e.WAITED: -2.0,
-        e.SAFE_WAIT: -2.0,
-        e.INVALID_ACTION: -2.0,
-        e.BOMB_DROPPED: -4.0,
-        e.IN_DANGER: -6.0,
-        e.KILLED_SELF: -20.0,
-        e.GOT_KILLED: -8.0,
+    # Split rewards into:
+    # - major outcomes (coin collection / death), which should dominate learning
+    # - shaping terms (movement heuristics), which are clipped per step
+    major_rewards = {
+        e.COIN_COLLECTED: 1.0,
+        e.CRATE_DESTROYED: 0.35,
+        e.KILLED_OPPONENT: 2.0,
+        e.KILLED_SELF: -1.2,
+        e.GOT_KILLED: -1.0,
+        e.COIN_FOUND: 0.10,
+        e.OPPONENT_ELIMINATED: 1.0,
+    }
+    shaping_rewards = {
+
+        e.REVERSED_DIRECTION: -0.2,
+
+        e.MOVED_CLOSE_TO_ENEMY: 0.00,
+        e.MOVED_AWAY_FROM_ENEMY: 0.00,
+
+        e.IN_DANGER: -0.10,
+        e.SAFE_WAIT: -0.00,
+
+        e.WAITED: -0.1,
+        e.INVALID_ACTION: 0.0,
+        e.BOMB_DROPPED: 0.0,
+        e.BOMB_EXPLODED: 0.0,
+        e.SURVIVED_ROUND: 0.0,
     }
 
-    reward_sum = 0.0
+    major_sum = 0.0
+    shaping_sum = 0.0
     for event in events:
-        reward_sum += game_rewards.get(event, 0.0)
+        major_sum += major_rewards.get(event, 0.0)
+        shaping_sum += shaping_rewards.get(event, 0.0)
 
-    # Strongly suppress fatal trajectories.
-    if e.KILLED_SELF in events or e.GOT_KILLED in events:
-        reward_sum -= 2.0
+    # Prevent step-wise shaping terms from overshadowing major outcomes.
+    shaping_sum = float(np.clip(shaping_sum, -0.25, 0.25))
+    reward_sum = major_sum + shaping_sum
 
-    # Log the reward (use info for traceability)
-    try:
-        self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
-    except Exception:
-        pass
+    if getattr(self, "log_dqn_details", False):
+        self.logger.info(
+            f"Awarded {reward_sum:.3f} (major={major_sum:.3f}, shaping={shaping_sum:.3f}) "
+            f"for events {', '.join(events)}"
+        )
 
     return float(reward_sum)
