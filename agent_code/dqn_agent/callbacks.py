@@ -13,7 +13,7 @@ MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-saved-model.pt")
 BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-model.pt")
 TRAINING_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-coin-collector.pt")
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
-VERBOSE_TRAIN_LOGS = True
+VERBOSE_TRAIN_LOGS = False
 
 GRID_CHANNELS = 10  # number of channels in the grid input to the DQN
 SCALAR_FEATURES = 8  # number of scalar features input to the DQN
@@ -213,9 +213,46 @@ def _is_valid_action(game_state: dict, action: str) -> bool:
     return False
 
 
+def _blast_positions(field, x, y, power):
+    """Return all cells affected by a bomb placed at (x, y)."""
+    blast = {(x, y)}
+    for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+        for step in range(1, power + 1):
+            nx, ny = x + dx * step, y + dy * step
+            if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
+                break
+            if field[nx, ny] == -1:
+                break
+            blast.add((nx, ny))
+    return blast
+
+
+def _bomb_is_unsafe(game_state: dict) -> bool:
+    """Reject bomb actions unless they can hit a crate or an enemy."""
+    if game_state is None:
+        return True
+
+    field = game_state["field"]
+    _, _, _, (x, y) = game_state["self"]
+    explosion_map = game_state.get('explosion_map', np.zeros_like(field))
+    if explosion_map[x, y] > 0:
+        return True
+
+    blast = _blast_positions(field, x, y, s.BOMB_POWER)
+    crates_in_range = any(field[cx, cy] == 1 for cx, cy in blast)
+    enemies_in_range = any(
+        (ox, oy) == (cx, cy)
+        for (cx, cy) in blast
+        for ox, oy in [o[-1] for o in game_state["others"] if o[-1] is not None]
+    )
+    return not crates_in_range and not enemies_in_range
+
+
 def _policy_action_mask(game_state: dict) -> np.ndarray:
     """Return the action mask used by the DQN policy."""
     mask = np.array([_is_valid_action(game_state, action) for action in ACTIONS], dtype=bool)
+    if game_state is not None and mask[ACTIONS.index('BOMB')] and _bomb_is_unsafe(game_state):
+        mask[ACTIONS.index('BOMB')] = False
     return mask
 
 def _feature_dimensions() -> tuple:
@@ -439,25 +476,26 @@ def act(self, game_state: dict) -> str:
         grid_t = torch.from_numpy(grid).unsqueeze(0).to(self.device)  # shape (1, C, H, W)
         scalar_t = torch.from_numpy(scalar).unsqueeze(0).to(self.device)  # shape (1, S)
 
-        if self.train:
-            epsilon = self.get_epsilon()
-            if random.random() < epsilon:
-                valid_actions = [a for a, allowed in zip(ACTIONS, _policy_action_mask(game_state)) if allowed]
-                if not valid_actions:
-                    chosen_action = 'WAIT'
-                else:
-                    candidates = valid_actions
-                    if np.max(explosion_map) == 0 and coins_remaining > 0:
-                        non_wait_candidates = [a for a in candidates if a != 'WAIT']
-                        if non_wait_candidates:
-                            candidates = non_wait_candidates
-                    chosen_action = random.choice(candidates)
-                if getattr(self, "log_dqn_details", False):
-                    self.logger.info(
-                        f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
-                        f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
-                    )
-                return chosen_action
+        epsilon = self.get_epsilon() if self.train and hasattr(self, "get_epsilon") else 0.0
+
+        if self.train and random.random() < epsilon:
+            valid_actions = [a for a, allowed in zip(ACTIONS, _policy_action_mask(game_state)) if allowed]
+            if not valid_actions:
+                chosen_action = 'WAIT'
+            else:
+                candidates = valid_actions
+                if np.max(explosion_map) == 0 and coins_remaining > 0:
+                    non_wait_candidates = [a for a in candidates if a != 'WAIT']
+                    if non_wait_candidates:
+                        candidates = non_wait_candidates
+                chosen_action = random.choice(candidates)
+            if getattr(self, "log_dqn_details", False):
+                self.logger.info(
+                    f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
+                    f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
+                )
+            return chosen_action
+
         with torch.no_grad():
             q = self.policy_net(grid_t, scalar_t)  # shape (1, n_actions)
             action_mask = _policy_action_mask(game_state)
@@ -466,13 +504,13 @@ def act(self, game_state: dict) -> str:
                     q[0, i] = float('-inf')
             action_idx = int(q.argmax(dim=1).item())
             chosen_action = ACTIONS[action_idx]
-            epsilon_value = self.get_epsilon() if hasattr(self, "get_epsilon") else 0.0
-            if getattr(self, "log_dqn_details", False):
-                self.logger.info(
-                    f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
-                    f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon_value:.3f}"
-                )
-            return chosen_action
+
+        if getattr(self, "log_dqn_details", False):
+            self.logger.info(
+                f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
+                f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
+            )
+        return chosen_action
     except Exception as exc:
         self.logger.warning("DQN act failed, falling back to table or random policy : %s", exc)
         candidates = [a for a, allowed in zip(ACTIONS, _policy_action_mask(game_state)) if allowed]
