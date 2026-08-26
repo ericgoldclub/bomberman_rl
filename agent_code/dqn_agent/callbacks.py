@@ -11,7 +11,7 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-saved-model.pt")
 BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-model.pt")
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
-VERBOSE_TRAIN_LOGS = True
+VERBOSE_TRAIN_LOGS = False
 MAX_OPPONENT_SLOTS = 3
 TACTICAL_CRATE_PENALTY = 3
 _KNOWN_OPPONENT_IDS = []
@@ -406,15 +406,16 @@ def state_to_features(game_state: dict) -> np.array:
 
     if len(coins) == 0:
         coin_count_normalized = 0.0
-        dist_coin = 0.0
+        #dist_coin = 0.0
     else:
         coin_count_normalized = min(1.0, float(len(coins)) / float(max(1, H * W)))
         coin_costs = [tactical_cost_map[cx, cy] for cx, cy in coins]
         valid_coin_costs = [c for c in coin_costs if np.isfinite(c)]
+        '''
         dist_coin = _normalize_distance(
             int(min(valid_coin_costs)) if valid_coin_costs else None,
             distance_normalizer,
-        )
+        )'''
 
     time_remaining = 1.0 - (game_state["step"] / float(s.MAX_STEPS))
     enemy_features = []

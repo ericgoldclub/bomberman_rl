@@ -128,7 +128,7 @@ def setup_training(self):
     # For convenience: keep epsilon parameters on self (can be tuned)
     self.epsilon_start = 1.0
     self.epsilon_end = 0.05
-    self.epsilon_decay = 259145
+    self.epsilon_decay = 27323261
 
     # Attach a helper to compute current epsilon
     self.get_epsilon = lambda: self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-1.0 * self.steps_done / self.epsilon_decay)
@@ -217,7 +217,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 events.append(e.SAFE_WAIT)
         '''
 
-        '''
+        
         if old_game_state is not None:
             old_pos = old_game_state["self"][-1]
             new_pos = new_game_state["self"][-1]
@@ -232,8 +232,11 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 if skp < 0:
                     events.append(e.REVERSED_DIRECTION)
            
-
-
+            self.previous_old_position = old_pos
+            # Update velocity for next step's reversal detection
+            self.previous_velocity = (new_pos[0] - old_pos[0], new_pos[1] - old_pos[1])
+         
+            '''
             old_others = [o[-1] for o in old_game_state["others"] if o[-1] is not None]
             new_others = [o[-1] for o in new_game_state["others"] if o[-1] is not None]
             if old_others and new_others:
@@ -243,11 +246,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                     events.append(e.MOVED_CLOSE_TO_ENEMY)
                 elif new_enemy_min > old_enemy_min:
                     events.append(e.MOVED_AWAY_FROM_ENEMY)
-
-            self.previous_old_position = old_pos
-            # Update velocity for next step's reversal detection
-            self.previous_velocity = (new_pos[0] - old_pos[0], new_pos[1] - old_pos[1])
-         '''
+            '''
     reward = reward_from_events(self, events)
     old_feats = state_to_features(old_game_state)
     new_feats = state_to_features(new_game_state)
@@ -329,15 +328,15 @@ def reward_from_events(self, events: List[str]) -> float:
     major_rewards = {
         e.COIN_COLLECTED: 1.0,
         e.CRATE_DESTROYED: 0.35,
-        e.KILLED_OPPONENT: 2.0,
+        e.KILLED_OPPONENT: -1.2,
         e.KILLED_SELF: -1.2,
-        e.GOT_KILLED: -1.0,
+        e.GOT_KILLED: -5.0,
         e.COIN_FOUND: 0.10,
         e.OPPONENT_ELIMINATED: 1.0,
     }
     shaping_rewards = {
 
-        e.REVERSED_DIRECTION: 0.0,
+        e.REVERSED_DIRECTION: -0.05,
 
         e.MOVED_CLOSE_TO_ENEMY: 0.00,
         e.MOVED_AWAY_FROM_ENEMY: 0.00,
@@ -345,9 +344,9 @@ def reward_from_events(self, events: List[str]) -> float:
         e.IN_DANGER: -0.10,
         e.SAFE_WAIT: -0.00,
 
-        e.WAITED: -0.01,
+        e.WAITED: -0.05,
         e.INVALID_ACTION: 0.0,
-        e.BOMB_DROPPED: 0.0,
+        e.BOMB_DROPPED: -0.1,
         e.BOMB_EXPLODED: 0.0,
         e.SURVIVED_ROUND: 0.0,
     }
