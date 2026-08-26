@@ -5,6 +5,7 @@ import heapq
 
 import numpy as np
 import settings as s
+from collections import deque
 
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
@@ -13,9 +14,11 @@ BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-model.pt")
 TRAINING_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-coin-collector.pt")
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
 VERBOSE_TRAIN_LOGS = True
-MAX_OPPONENT_SLOTS = 3
-TACTICAL_CRATE_PENALTY = 3
-_KNOWN_OPPONENT_IDS = []
+
+GRID_CHANNELS = 10  # number of channels in the grid input to the DQN
+SCALAR_FEATURES = 8  # number of scalar features input to the DQN
+
+
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -72,18 +75,70 @@ def setup(self):
     """Setup called once when loading the agent."""
     # hyperparams for acting
     # Initialize device and feature size metadata
-    import settings as s
+  
     try:
         import torch
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     except Exception:
         self.device = None
 
+    self.grid_channels = GRID_CHANNELS
+    self.scalar_size = SCALAR_FEATURES
+
+    self.logger.info(
+        "Feature dimensions: grid_channels=%d, scalar_size=%d",
+        self.grid_channels,
+        self.scalar_size,
+    )
+    self.grid_size = (s.COLS, s.ROWS)
+    self.log_dqn_details = VERBOSE_TRAIN_LOGS
+
+    from .train import DQN
+
+    self.policy_net = DQN(
+        in_channels=self.grid_channels,
+        grid_size=self.grid_size,
+        scalar_size=self.scalar_size,
+        n_actions=len(ACTIONS),
+    ).to(self.device)
+
+    if self.train:
+        load_path = TRAINING_MODEL_FILE
+    elif os.path.isfile(BEST_MODEL_FILE):
+        load_path = BEST_MODEL_FILE
+    else:
+        load_path = MODEL_FILE
+
+    self.logger.info(
+        "Model selection mode=%s path=%s exists=%s",
+        "train" if self.train else "eval",
+        load_path,
+        os.path.isfile(load_path),
+    )
+
+    if os.path.isfile(load_path):
+        checkpoint = torch.load(load_path, map_location=self.device,)
+
+        self.policy_net.load_state_dict(checkpoint)
+
+        self.logger.info("Loaded DQN model from %s", load_path)
+
+    else:
+        self.logger.warning(
+            "No saved DQN model found; using freshly initialized policy network."
+        )
+
+    self.policy_net.eval()
+
+
+'''
     # Infer feature sizes from the feature extractor so network inputs stay aligned.
+
     self.grid_channels, self.scalar_size = _feature_dimensions()
+
     self.logger.info("Feature dimensions: grid_channels=%d, scalar_size=%d", self.grid_channels, self.scalar_size)
     self.log_dqn_details = VERBOSE_TRAIN_LOGS
-    # Grid size (COLS, ROWS) as used by the environment
     self.grid_size = (s.COLS, s.ROWS)
 
     # Do not instantiate the full model here; create it lazily in act() or in setup_training.
@@ -129,41 +184,8 @@ def setup(self):
         self.policy_net.eval()
     except Exception as exc:
         self.logger.warning("Failed to initialize/load DQN model in setup: %s", exc)
+'''
 
-
-
-
-
-def _blast_positions(field, x, y, power):
-    """Return all cells affected by a bomb placed at (x, y)."""
-    blast = {(x, y)}
-    for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
-        for step in range(1, power + 1):
-            nx, ny = x + dx * step, y + dy * step
-            if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
-                break
-            if field[nx, ny] == -1:
-                break
-            blast.add((nx, ny))
-    return blast
-
-
-def _bomb_is_unsafe(game_state: dict) -> bool:
-    """Bomb placement is discouraged unless it can hit a crate or enemy."""
-    if game_state is None:
-        return True
-
-    field = game_state["field"]
-    _, _, _, (x, y) = game_state["self"]
-    explosion_map = game_state.get('explosion_map', np.zeros_like(field))
-    if explosion_map[x, y] > 0:
-        return True
-
-    blast = _blast_positions(field, x, y, s.BOMB_POWER)
-    crates_in_range = any(field[cx, cy] == 1 for cx, cy in blast)
-    enemies_in_range = any((ox, oy) == (cx, cy) for (cx, cy) in blast for ox, oy in [o[-1] for o in game_state["others"] if o[-1] is not None])
-
-    return not crates_in_range and not enemies_in_range
 
 
 def _is_valid_action(game_state: dict, action: str) -> bool:
@@ -194,136 +216,12 @@ def _is_valid_action(game_state: dict, action: str) -> bool:
 def _policy_action_mask(game_state: dict) -> np.ndarray:
     """Return the action mask used by the DQN policy."""
     mask = np.array([_is_valid_action(game_state, action) for action in ACTIONS], dtype=bool)
-    if game_state is not None and mask[ACTIONS.index('BOMB')] and _bomb_is_unsafe(game_state):
-        mask[ACTIONS.index('BOMB')] = False
     return mask
 
+def _feature_dimensions() -> tuple:
+    """Return (grid_channels, scalar_size) from the fixed constants."""
+    return GRID_CHANNELS, SCALAR_FEATURES
 
-def _feature_dimensions() -> tuple[int, int]:
-    """Infer feature dimensions from the current feature extractor."""
-    dummy_field = np.zeros((s.COLS, s.ROWS), dtype=np.int8)
-    dummy_state = {
-        "field": dummy_field,
-        "coins": [],
-        "bombs": [],
-        "explosion_map": np.zeros_like(dummy_field),
-        "self": ("agent", 0, True, (0, 0)),
-        "others": [],
-        "step": 0,
-    }
-    grid, scalar = state_to_features(dummy_state)
-    return grid.shape[0], scalar.shape[0]
-
-
-def _in_bounds(x: int, y: int, field: np.ndarray) -> bool:
-    return 0 <= x < field.shape[0] and 0 <= y < field.shape[1]
-
-
-def _shortest_path_cost(
-    field: np.ndarray,
-    start: tuple[int, int],
-    target: tuple[int, int],
-    blocked: set[tuple[int, int]],
-    crate_penalty: int | None,
-) -> int | None:
-    if start == target:
-        return 0
-
-    pq: list[tuple[int, tuple[int, int]]] = [(0, start)]
-    best_cost: dict[tuple[int, int], int] = {start: 0}
-
-    while pq:
-        cost, (x, y) = heapq.heappop(pq)
-        if (x, y) == target:
-            return cost
-        if cost != best_cost.get((x, y)):
-            continue
-
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            nx, ny = x + dx, y + dy
-            if not _in_bounds(nx, ny, field):
-                continue
-            if (nx, ny) in blocked and (nx, ny) != target:
-                continue
-            tile = field[nx, ny]
-            if tile == -1:
-                continue
-
-            if crate_penalty is None:
-                if tile == 1 and (nx, ny) != target:
-                    continue
-                step_cost = 1
-            else:
-                step_cost = crate_penalty if tile == 1 and (nx, ny) != target else 1
-
-            new_cost = cost + step_cost
-            if new_cost < best_cost.get((nx, ny), 10**9):
-                best_cost[(nx, ny)] = new_cost
-                heapq.heappush(pq, (new_cost, (nx, ny)))
-
-    return None
-
-
-def _normalize_distance(distance: int | None, normalizer: float) -> float:
-    if distance is None:
-        return 1.0
-    if normalizer <= 0:
-        return 0.0
-    return min(1.0, float(distance) / normalizer)
-
-
-def _tactical_cost_map(
-    field: np.ndarray,
-    start: tuple[int, int],
-    blocked: set[tuple[int, int]],
-    crate_penalty: int,
-) -> np.ndarray:
-    H, W = field.shape
-    cost_map = np.full((H, W), fill_value=np.inf, dtype=np.float32)
-    pq: list[tuple[int, tuple[int, int]]] = [(0, start)]
-    cost_map[start] = 0.0
-
-    while pq:
-        cost, (x, y) = heapq.heappop(pq)
-        if cost > cost_map[x, y]:
-            continue
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            nx, ny = x + dx, y + dy
-            if not _in_bounds(nx, ny, field):
-                continue
-            if (nx, ny) in blocked and (nx, ny) != start:
-                continue
-            tile = field[nx, ny]
-            if tile == -1:
-                continue
-            step_cost = crate_penalty if tile == 1 else 1
-            next_cost = cost + step_cost
-            if next_cost < cost_map[nx, ny]:
-                cost_map[nx, ny] = next_cost
-                heapq.heappush(pq, (int(next_cost), (nx, ny)))
-
-    return cost_map
-
-
-def _opponent_slots(game_state: dict) -> list[tuple[str, tuple[int, int] | None]]:
-    global _KNOWN_OPPONENT_IDS
-
-    opponent_positions = {}
-    for other in game_state["others"]:
-        if other[-1] is None:
-            continue
-        opponent_positions[other[0]] = other[-1]
-
-    step = int(game_state.get("step", 0))
-    if step <= 1:
-        _KNOWN_OPPONENT_IDS = sorted(opponent_positions.keys())
-    else:
-        for opponent_id in sorted(opponent_positions.keys()):
-            if opponent_id not in _KNOWN_OPPONENT_IDS:
-                _KNOWN_OPPONENT_IDS.append(opponent_id)
-
-    slots = _KNOWN_OPPONENT_IDS[:MAX_OPPONENT_SLOTS]
-    return [(opponent_id, opponent_positions.get(opponent_id)) for opponent_id in slots]
 
 
 def state_to_features(game_state: dict) -> np.array:
@@ -341,121 +239,180 @@ def state_to_features(game_state: dict) -> np.array:
     field = game_state["field"] # shape (cols, rows)
     coins = game_state["coins"]
     bombs = game_state["bombs"] # list of ((x,y), timer)
-    explosion_map = game_state.get('explosion_map', np.zeros_like(field))
-    danger_map = (explosion_map > 0).astype(np.float32)
-
-    _, _, _, (x, y) = game_state["self"]
-    others = [o[-1] for o in game_state["others"] if o[-1] is not None]
-    opponent_slots = _opponent_slots(game_state)
-    H, W = field.shape
+    explosion_map = game_state.get('explosion_map', np.zeros_like(field, dtype=np.float32))
+    X, Y = field.shape
 
     walls = (field == -1).astype(int)
     crates = (field == 1).astype(int)
-    coins_map = np.zeros_like(field, dtype=np.float32)
+
+    coins_map = np.zeros((X, Y), dtype=np.float32)
     for cx, cy in coins:
-        coins_map[cx, cy] = 1.0
+        if 0 <= cx < X and 0 <= cy < Y:
+            coins_map[cx, cy] = 1.0
+    
+    _, _, _, (x, y) = game_state["self"]
 
-    others_map = np.zeros_like(field, dtype=np.float32)
-    for ox, oy in others:
-        others_map[ox, oy] = 1.0
+    self_map = np.zeros((X, Y), dtype=np.float32)
+    if 0 <= x < X and 0 <= y < Y:
+        self_map[x, y] = 1.0
 
-    self_map = np.zeros_like(field, dtype=np.float32)
-    self_map[x, y] = 1.0
+    others = [o[-1] for o in game_state["others"] if o[-1] is not None]
 
-    danger_map = (explosion_map > 0).astype(np.float32)
-    for (bx, by), timer in bombs:
-        if not (0 <= bx < H and 0 <= by < W):
+    enemy_maps = []
+
+    for i in range(s.MAX_AGENTS - 1):
+        enemy_map = np.zeros((X, Y), dtype=np.float32)
+        if i < len(others):
+            ox, oy = others[i]
+
+            if 0 <= ox < X and 0 <= oy < Y:
+                enemy_map[ox, oy] = 1.0
+        enemy_maps.append(enemy_map)
+
+    bomb_map = np.zeros((X, Y), dtype=np.float32)
+    bomb_timer_map = np.zeros((X, Y), dtype=np.float32)
+
+    danger_time = np.full((X, Y), fill_value=np.inf, dtype=np.float32) #inf means safe, 0 means danger now, 1 means danger in 1 step, etc.
+    danger_time[explosion_map > 0] = 0.0
+
+
+
+    for (bomb_x, bomb_y), timer in bombs:
+        if not (0 <= bomb_x < X and 0 <= bomb_y < Y):
             continue
-        blast = {(bx, by)}
+
+        bomb_map[bomb_x, bomb_y] = 1.0
+
+        bomb_timer_map[bomb_x, bomb_y] = float(timer) / max(1.0, float(s.BOMB_TIMER))
+
+        if timer < danger_time[bomb_x, bomb_y]:
+            danger_time[bomb_x, bomb_y] = float(timer)
+
+        # Propagate blast from this bomb
         for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
             for step in range(1, s.BOMB_POWER + 1):
-                nx, ny = bx + dx * step, by + dy * step
-                if not (0 <= nx < H and 0 <= ny < W):
+                nx = bomb_x + dx * step
+                ny = bomb_y + dy * step
+                if not (0 <= nx < X and 0 <= ny < Y):
                     break
                 if field[nx, ny] == -1:
                     break
-                blast.add((nx, ny))
-        urgency = 1.0 / max(float(timer), 1.0)
-        for x_cell, y_cell in blast:
-            danger_map[x_cell, y_cell] = max(danger_map[x_cell, y_cell], urgency)
+                explosion_time = float(timer)
+                if explosion_time < danger_time[nx, ny]:
+                    danger_time[nx, ny] = explosion_time
+                if field[nx, ny] == 1:
+                    break
 
-    coord_idx = np.fromfunction(
-        lambda y, x: (x + y * W) / float(max(1, H * W)),
-        (H, W),
-        dtype=np.float32,
-    )
+    danger_map = np.zeros((X, Y), dtype=np.float32)
+    finite_danger_time = np.isfinite(danger_time)
+
+    MAX_DANGER_TIME = max(1.0, float(s.BOMB_TIMER))
+
+    danger_map[finite_danger_time] = np.clip(1.0 - danger_time[finite_danger_time] / MAX_DANGER_TIME, 0.0, 1.0)
+    '''
+    x_coord = np.zeros((X, Y), dtype=np.float32)
+    y_coord = np.zeros((X, Y), dtype=np.float32)
+
+    for jx in range(X):
+        x_coord[jx, :] = float(jx) / max(1.0, float(X - 1))
+    for jy in range(Y):
+        y_coord[:, jy] = float(jy) / max(1.0, float(Y - 1))
+    '''
 
     grid = np.stack([
         walls,
         crates,
         coins_map,
-        others_map,
         self_map,
+
+        enemy_maps[0],
+        enemy_maps[1],
+        enemy_maps[2],
+
+        bomb_map,
+        bomb_timer_map,
         danger_map,
-        coord_idx,
+       # x_coord,
+       # y_coord
+
     ], axis=0).astype(np.float32)
 
 
     bombs_left = 1.0 if game_state["self"][2] else 0.0
-    distance_normalizer = float(max(1, H + W))
-    bomb_positions = {pos for (pos, _) in bombs}
 
-    if len(coins) == 0 and not any(enemy_pos is not None for _, enemy_pos in opponent_slots):
-        coin_count_normalized = 0.0
-        enemy_features = [0.0, 0.0] * MAX_OPPONENT_SLOTS
-        time_remaining = 1.0 - (game_state["step"] / float(s.MAX_STEPS))
-        scalar = np.array(
-            [bombs_left, coin_count_normalized, time_remaining, *enemy_features],
-            dtype=np.float32,
-        )
-        return grid, scalar
+    coins_left_normalized = float(len(coins)) / (max(1.0, float(s.COIN_COUNT)))
+    time_remaining = np.clip(1.0 - float(game_state["step"])/float(s.MAX_STEPS), 0.0, 1.0)
 
-    blocked_positions = set(others)
-    blocked_positions.update(bomb_positions)
-    tactical_cost_map = _tactical_cost_map(
-        field=field,
-        start=(x, y),
-        blocked=blocked_positions,
-        crate_penalty=TACTICAL_CRATE_PENALTY,
-    )
+    enemies_remaining = float(len(others)) / max(1.0, float(s.MAX_AGENTS - 1))
 
-    '''
-    if len(coins) == 0:
-        coin_count_normalized = 0.0
-        #dist_coin = 0.0
-    else:
-        coin_count_normalized = min(1.0, float(len(coins)) / float(max(1, H * W)))
-        coin_costs = [tactical_cost_map[cx, cy] for cx, cy in coins]
-        valid_coin_costs = [c for c in coin_costs if np.isfinite(c)]
-       
-        dist_coin = _normalize_distance(
-            int(min(valid_coin_costs)) if valid_coin_costs else None,
-            distance_normalizer,
-        )'''
+    distance_map = np.full((X, Y), fill_value=np.inf, dtype=np.float32)
+    distance_map[x, y] = 0.0
 
-    coin_count_normalized = len(coins)  
+    queue = deque([(x, y)])
 
-    time_remaining = 1.0 - (game_state["step"] / float(s.MAX_STEPS))
-    enemy_features = []
-    for _, enemy_pos in opponent_slots:
-        if enemy_pos is None:
-            enemy_features.extend([0.0, 0.0])
+    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+    while queue:
+        cx, cy = queue.popleft()
+        current_distance = distance_map[cx, cy]
+
+        for dx, dy in directions:
+            nx = cx + dx
+            ny = cy + dy
+
+            if not (0 <= nx < X and 0 <= ny < Y):
+                continue
+
+            if np.isfinite(distance_map[nx, ny]): # already visited
+                continue
+
+            if field[nx, ny] == -1 or field[nx, ny] == 1: # wall or crate
+                continue
+
+            distance_map[nx, ny] = current_distance + 1.0
+            queue.append((nx, ny))
+
+    coin_distances = []
+
+    for cx, cy in coins:
+        if not (0 <= cx < X and 0 <= cy < Y):
             continue
 
-        enemy_cost = tactical_cost_map[enemy_pos]
-        enemy_features.extend([
-            1.0,
-            _normalize_distance(int(enemy_cost) if np.isfinite(enemy_cost) else None, distance_normalizer),
-        ])
+        distance = distance_map[cx, cy]
+        if np.isfinite(distance):
+            coin_distances.append(distance)
 
-    while len(enemy_features) < MAX_OPPONENT_SLOTS * 2:
-        enemy_features.extend([0.0, 0.0])
+    if coin_distances:
+        nearest_coin_distance = min(coin_distances)
+        mean_coin_distance = np.mean(coin_distances)
+        farthest_coin_distance = max(coin_distances)
+        reachable_coins_count = len(coin_distances)
 
-    #dist_coin
-    scalar = np.array(
-        [bombs_left, coin_count_normalized, time_remaining, *enemy_features],
-        dtype=np.float32
-    )
+    else:
+        nearest_coin_distance = 0
+        mean_coin_distance = 0
+        farthest_coin_distance = 0
+        reachable_coins_count = 0
+
+    distance_normalizer = float(max(1, s.COLS + s.ROWS - 2))  # max distance in the grid
+
+    nearest_coin_distance = np.clip(nearest_coin_distance / distance_normalizer, 0.0, 1.0)
+    mean_coin_distance = np.clip(mean_coin_distance / distance_normalizer, 0.0, 1.0)
+    farthest_coin_distance = np.clip(farthest_coin_distance / distance_normalizer, 0.0, 1.0)
+
+    reachable_coins_fraction = float(reachable_coins_count) / max(1.0, len(coins))
+
+    scalar = np.array([
+        bombs_left,
+        coins_left_normalized,
+        time_remaining,
+        enemies_remaining,
+
+        reachable_coins_fraction,
+        nearest_coin_distance,
+        mean_coin_distance,
+        farthest_coin_distance,
+    ], dtype=np.float32)
 
     return grid, scalar
 

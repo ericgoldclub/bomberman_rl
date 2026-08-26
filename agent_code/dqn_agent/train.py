@@ -2,6 +2,7 @@ import os
 import random
 from collections import deque, namedtuple
 from typing import List
+import copy
 
 import numpy as np
 
@@ -14,7 +15,10 @@ from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BEST_MODEL_FILE, 
 import events as e
 import settings as s
 
-Transition = namedtuple('Transition', ('grid', 'scalar', 'action', 'next_grid', 'next_scalar', 'next_action_mask', 'reward'))
+Transition = namedtuple(
+    'Transition',
+    ('grid', 'scalar', 'action', 'next_grid', 'next_scalar', 'next_action_mask', 'reward')
+)
 
 # Hyperparameters
 BUFFER_SIZE = 100_000
@@ -24,6 +28,12 @@ LR = 1e-4
 TARGET_UPDATE = 8192  # steps
 MIN_REPLAY_SIZE = 5000
 TRAIN_EVERY_STEPS = 8
+# Weight applied to the actual game score injected as a terminal reward bonus.
+# Keeps it on the same scale as per-step rewards (max score ~15, max_steps=200).
+SCORE_TERMINAL_WEIGHT = 1.0 / 10.0
+
+ALL_COINS_BONUS = 2.0
+TIME_PENALTY = 0.01
 
 
 class DQN(nn.Module):
@@ -38,7 +48,10 @@ class DQN(nn.Module):
         self.cnn = nn.Sequential(
         nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
         nn.ReLU(),
-        nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+        nn.Conv2d(32, 64, kernel_size=3, padding=1),
+        nn.ReLU(),
+
+        nn.Conv2d(64, 64, kernel_size=3, padding=1),
         nn.ReLU(),
         )
 
@@ -70,22 +83,20 @@ class DQN(nn.Module):
 
 
     def forward(self, grid : torch.Tensor, scalar : torch.Tensor) -> torch.Tensor:
-        # grid: (batch_size, in_channels, H, W)
-        # scalar: (batch_size, scalar_size)
 
-        x = self.cnn(grid)  # (batch_size, 128, H', W')
+
+        x = self.cnn(grid)  
         x = torch.flatten(x, 1)
 
-        s = self.scalar_fc(scalar)  # (batch_size, 32)
+        s = self.scalar_fc(scalar)  
 
-        x = torch.cat([x,s], dim=1)  # (batch_size, combined_dim)
-
+        x = torch.cat([x,s], dim=1) 
         x = self.shared(x)
 
-        value = self.value(x)  # (batch_size, 1)
-        advantage = self.advantage(x)  # (batch_size, n_actions)
+        value = self.value(x)  
+        advantage = self.advantage(x) 
 
-        Q = value + advantage - advantage.mean(dim=1, keepdim=True)  # (batch_size, n_actions)
+        Q = value + advantage - advantage.mean(dim=1, keepdim=True)  
 
         return Q
 
@@ -94,6 +105,7 @@ def setup_training(self):
 
     self.replay_buffer = deque(maxlen=BUFFER_SIZE)
     self.steps_done = 0
+    self.gradient_steps = 0
     self.round_coins_collected = 0
     self.round_number_kills = 0
     self.best_score = -1
@@ -101,197 +113,430 @@ def setup_training(self):
     self.previous_velocity = (0,0)
     self.position_history = deque(maxlen=4)
 
-    # Determine sizes from self (set by callbacks.setup) or infer them from the feature extractor.
-    C = getattr(self, 'grid_channels', None)
-    if C is None:
-        C, _ = _feature_dimensions()
-    H, W = getattr(self, 'grid_size', (17, 17))
-    S = getattr(self, 'scalar_size', None)
-    if S is None:
-        _, S = _feature_dimensions()
 
-    # Instantiate networks if not already present
-    if not hasattr(self, 'policy_net'):
-        self.policy_net = DQN(in_channels=C, grid_size=(H, W), scalar_size=S, n_actions=len(ACTIONS))
-    self.logger.info( "Training checkpoint source path=%s exists=%s",
-        TRAINING_MODEL_FILE,
-        os.path.isfile(TRAINING_MODEL_FILE),
-    )
-    if os.path.isfile(TRAINING_MODEL_FILE):
-        load_device = getattr(self, 'device', torch.device("cpu"))
-        self.policy_net.load_state_dict(torch.load(TRAINING_MODEL_FILE, map_location=load_device))
-        self.logger.info("Loaded training checkpoint from %s", TRAINING_MODEL_FILE)
-    if not hasattr(self, 'target_net'):
-        self.target_net = DQN(in_channels=C, grid_size=(H, W), scalar_size=S, n_actions=len(ACTIONS))
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.target_net.eval()  # target net is not trained, only used for evaluation
+    if not hasattr(self, "policy_net"):
+        raise RuntimeError("policy_net must be initialized in setup() before calling setup_training()")
 
-    self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LR)
+    self.policy_net.to(self.device)
+
+    self.target_net = copy.deepcopy(self.policy_net)
+    self.target_net.to(self.device)
+    self.target_net.eval()  # target net is not trained, only used for evaluation
+    for param in self.target_net.parameters():
+        param.requires_grad = False 
+
+    self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=LR) #weight_decay=1e-4)
+
     self.loss_fn = nn.SmoothL1Loss()
 
-    # Device
-    self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    self.policy_net.to(self.device)
-    self.target_net.to(self.device)
-
-    # For convenience: keep epsilon parameters on self (can be tuned)
     self.epsilon_start = 1.0
     self.epsilon_end = 0.05
-    self.epsilon_decay = 514235
-
-    # Attach a helper to compute current epsilon
+    self.epsilon_decay = 6856462
     self.get_epsilon = lambda: self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-1.0 * self.steps_done / self.epsilon_decay)
+
+    self.logger.info(
+        "Training initialized: buffer=%d, batch=%d, gamma=%.3f, lr=%g",
+        BUFFER_SIZE,
+        BATCH_SIZE,
+        GAMMA,
+        LR,
+    )
 
 
 def optimize_model(self):
+
+    '''Perform double DQN optimization step on a batch of transitions from the replay buffer.'''
+
     if len(self.replay_buffer) < MIN_REPLAY_SIZE:
-        return
+        return None
 
     batch = random.sample(self.replay_buffer, BATCH_SIZE)
 
-    states_grid = np.stack([b.grid for b in batch], axis=0)# (B, C, H, W)
-    states_scalar = np.stack([b.scalar for b in batch], axis=0) # (B, scalar_size)
-    actions_np = np.array([ACTIONS.index(b.action) for b in batch], dtype=np.int64) # (B,)
-    rewards_np = np.array([b.reward for b in batch], dtype=np.float32).reshape(-1, 1) # (B, 1)
+    states_grid_np = np.stack(
+        [transition.grid for transition in batch],
+        axis=0,
+    ).astype(np.float32)
 
-    non_final_mask_np = np.array([b.next_grid is not None for b in batch], dtype=bool) # (B,)
-    non_final_next_grid_np = np.stack([b.next_grid for b in batch if b.next_grid is not None], axis=0) if non_final_mask_np.any() else np.empty((0, states_grid.shape[1], states_grid.shape[2], states_grid.shape[3]), dtype=np.float32)
+    states_scalar_np = np.stack(
+        [transition.scalar for transition in batch],
+        axis=0,
+    ).astype(np.float32)
 
-    non_final_next_scalar_np = np.stack([b.next_scalar for b in batch if b.next_scalar is not None], axis=0) if non_final_mask_np.any() else np.empty((0, states_scalar.shape[1]), dtype=np.float32)
-    non_final_next_action_mask_np = np.stack([b.next_action_mask for b in batch if b.next_action_mask is not None], axis=0) if non_final_mask_np.any() else np.empty((0, len(ACTIONS)), dtype=bool)
+    # Store the action as an integer index.
+    actions_np = np.array(
+        [ACTIONS.index(transition.action) for transition in batch],
+        dtype=np.int64,
+    )
 
-    # Convert to torch tensors
+    rewards_np = np.array(
+        [transition.reward for transition in batch],
+        dtype=np.float32,
+    )
 
-    states_grid = torch.from_numpy(states_grid.astype(np.float32)).to(self.device)
-    states_scalar = torch.from_numpy(states_scalar.astype(np.float32)).to(self.device)
-    actions = torch.from_numpy(actions_np.astype(np.int64)).to(self.device).unsqueeze(1)
-    rewards = torch.from_numpy(rewards_np.astype(np.float32)).to(self.device)
+    # A transition is non-terminal if it contains a next state.
+    non_final_mask_np = np.array(
+        [transition.next_grid is not None for transition in batch],
+        dtype=bool,
+    )
 
-    nonfinal_next_grid = torch.from_numpy(non_final_next_grid_np.astype(np.float32)).to(self.device) if non_final_next_grid_np.size else torch.empty((0, states_grid.shape[1], states_grid.shape[2], states_grid.shape[3]), device=self.device)
+    # Extract only non-terminal next states.
+    non_final_transitions = [
+        transition
+        for transition in batch
+        if transition.next_grid is not None
+    ]
 
-    nonfinal_next_scalar = torch.from_numpy(non_final_next_scalar_np.astype(np.float32)).to(self.device) if non_final_next_scalar_np.size else torch.empty((0, states_scalar.shape[1]), device=self.device)
-    nonfinal_next_action_mask = torch.from_numpy(non_final_next_action_mask_np.astype(np.bool_)).to(self.device) if non_final_next_action_mask_np.size else torch.empty((0, len(ACTIONS)), dtype=torch.bool, device=self.device)
+    if non_final_transitions:
+        next_grids_np = np.stack(
+            [transition.next_grid for transition in non_final_transitions],
+            axis=0,
+        ).astype(np.float32)
 
-    # Compute Q(s_t, a)
-    q_values_all = self.policy_net(states_grid, states_scalar) # (B, n_actions)
-    q_values = q_values_all.gather(1, actions) # (B, 1)
+        next_scalars_np = np.stack(
+            [transition.next_scalar for transition in non_final_transitions],
+            axis=0,
+        ).astype(np.float32)
 
-    # Double DQN target evaluation
-    next_q_values = torch.zeros((BATCH_SIZE, 1), device=self.device)
-    if nonfinal_next_grid.size(0) > 0:
+        next_action_masks_np = np.stack(
+            [
+                transition.next_action_mask
+                for transition in non_final_transitions
+            ],
+            axis=0,
+        ).astype(bool)
+
+    else:
+        next_grids_np = None
+        next_scalars_np = None
+        next_action_masks_np = None
+
+
+
+    states_grid = torch.from_numpy(states_grid_np).to(self.device)
+    states_scalar = torch.from_numpy(states_scalar_np).to(self.device)
+
+    actions = (
+        torch.from_numpy(actions_np)
+        .to(self.device)
+        .unsqueeze(1)
+    )
+
+    rewards = (
+        torch.from_numpy(rewards_np)
+        .to(self.device)
+        .unsqueeze(1)
+    )
+
+    current_q_values = self.policy_net(
+        states_grid,
+        states_scalar,
+    )
+
+    # Select Q-value corresponding to the action that was actually taken.
+    current_q = current_q_values.gather(
+        1,
+        actions,
+    )
+
+    #Compute Double-DQN target
+    #a* = argmax_a Q_online(s', a)
+    #target = r + gamma * Q_target(s', a*)
+
+
+
+    next_q = torch.zeros(
+        BATCH_SIZE,
+        1,
+        device=self.device,
+    )
+
+    if non_final_transitions:
+
+        next_grids = torch.from_numpy(
+            next_grids_np
+        ).to(self.device)
+
+        next_scalars = torch.from_numpy(
+            next_scalars_np
+        ).to(self.device)
+
+        next_action_masks = torch.from_numpy(
+            next_action_masks_np
+        ).to(self.device)
+
+        # Sanity check: every non-terminal state must have
+        # at least one legal action.
+        if not next_action_masks.any(dim=1).all():
+            raise RuntimeError(
+                "Found a non-terminal state with no valid actions."
+            )
+
         with torch.no_grad():
-            next_policy_q = self.policy_net(nonfinal_next_grid, nonfinal_next_scalar) # (B', n_actions)
-            next_policy_q = next_policy_q.masked_fill(~nonfinal_next_action_mask, float('-inf'))
-            next_actions = next_policy_q.argmax(dim=1, keepdim=True) # (B', 1)
-            # Evaluate these actions using target network
-            next_target_q = self.target_net(nonfinal_next_grid, nonfinal_next_scalar).gather(1, next_actions) # (B', 1)
-        # Assign next Q-values into the full batch tensor at indices of non-final transitions
-        # Convert boolean mask to torch on device
-        non_final_mask = torch.from_numpy(non_final_mask_np).to(self.device)
-        # next_target_q has shape (N,1); place its values into next_q_values where mask is True
-        next_q_values[non_final_mask, 0] = next_target_q.squeeze(1)
 
-    expected_q = rewards + (GAMMA * next_q_values)
-    loss = self.loss_fn(q_values, expected_q)
-    self.optimizer.zero_grad()
+            next_online_q_values = self.policy_net(
+                next_grids,
+                next_scalars,
+            )
+
+            # Prevent illegal actions from being selected.
+            next_online_q_values = next_online_q_values.masked_fill(
+                ~next_action_masks,
+                float("-inf"),
+            )
+
+            next_actions = next_online_q_values.argmax(
+                dim=1,
+                keepdim=True,
+            )
+
+            next_target_q_values = self.target_net(
+                next_grids,
+                next_scalars,
+            )
+
+            next_target_q = next_target_q_values.gather(
+                1,
+                next_actions,
+            )
+
+        # Map the non-terminal next-Q values back to their
+        # corresponding positions in the complete batch.
+        non_final_mask = torch.from_numpy(
+            non_final_mask_np
+        ).to(self.device)
+
+        next_q[non_final_mask] = next_target_q
+
+
+
+    #Bellman target
+    target_q = rewards + GAMMA * next_q
+
+    # target_q is treated as a constant target.
+    target_q = target_q.detach()
+
+
+    loss = self.loss_fn(
+        current_q,
+        target_q,
+    )
+
+    self.optimizer.zero_grad(set_to_none=True)
+
     loss.backward()
-    nn.utils.clip_grad_norm_(self.policy_net.parameters(), 5)
+
+    nn.utils.clip_grad_norm_(
+        self.policy_net.parameters(),
+        max_norm=5.0,
+    )
+
     self.optimizer.step()
 
+    self.gradient_steps += 1
+
+    # Periodically synchronize target network.
+    if self.gradient_steps % TARGET_UPDATE == 0:
+        self.target_net.load_state_dict(
+            self.policy_net.state_dict()
+        )
+
+        if getattr(self, "log_dqn_details", False):
+            self.logger.info(
+                "Target network updated at gradient step %d",
+                self.gradient_steps,
+            )
+
+
     if getattr(self, "log_dqn_details", False):
-        self.logger.info(f"loss={loss.item():.6f}")
+        self.logger.info(
+            "loss=%.6f | gradient_step=%d | "
+            "mean_Q=%.4f | mean_target=%.4f",
+            loss.item(),
+            self.gradient_steps,
+            current_q.mean().item(),
+            target_q.mean().item(),
+        )
 
+    return loss.item()
 
-def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
-    """Called once per step to allow intermediate rewards based on game events and to store transitions."""
+def game_events_occurred(
+    self,
+    old_game_state: dict,
+    self_action: str,
+    new_game_state: dict,
+    events: List[str],
+):
+    """Called once per step to calculate reward and store transition."""
 
-    self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+    self.logger.debug(
+        f'Encountered game event(s) {", ".join(map(repr, events))} '
+        f'in step {new_game_state["step"]}'
+    )
 
     events = list(events)
-    self.round_coins_collected += events.count(e.COIN_COLLECTED)
-    self.round_number_kills += events.count(e.KILLED_OPPONENT)
+
+    # ------------------------------------------------------------
+    # Bookkeeping
+    # ------------------------------------------------------------
+
+    coins_collected = events.count(e.COIN_COLLECTED)
+    kills = events.count(e.KILLED_OPPONENT)
+
+    self.round_coins_collected += coins_collected
+    self.round_number_kills += kills
+
+    # ------------------------------------------------------------
+    # Additional event detection
+    # ------------------------------------------------------------
+
     if new_game_state is not None:
+
         field = new_game_state["field"]
-        explosion_map = new_game_state.get("explosion_map", np.zeros_like(field))
+
+        explosion_map = new_game_state.get(
+            "explosion_map",
+            np.zeros_like(field),
+        )
+
         _, _, _, (x, y) = new_game_state["self"]
+
+        # Player currently standing in an explosion.
         if explosion_map[x, y] > 0:
             events.append(e.IN_DANGER)
 
-        '''
-        if self_action == 'WAIT' and np.max(explosion_map) == 0 and new_game_state.get("coins"):
-            has_valid_move = any(
-                _is_valid_action(new_game_state, action)
-                for action in ('UP', 'RIGHT', 'DOWN', 'LEFT')
-            )
-            if has_valid_move:
-                events.append(e.SAFE_WAIT)
-       '''
+        # --------------------------------------------------------
+        # Movement-based shaping
+        # --------------------------------------------------------
+
         if old_game_state is not None:
+
             old_pos = old_game_state["self"][-1]
             new_pos = new_game_state["self"][-1]
 
-            current_velocity = (new_pos[0] - old_pos[0], new_pos[1] - old_pos[1])
+            current_velocity = (
+                new_pos[0] - old_pos[0],
+                new_pos[1] - old_pos[1],
+            )
 
             previous_vx, previous_vy = self.previous_velocity
             current_vx, current_vy = current_velocity
 
-            if (current_vx !=0 or current_vy !=0) and (previous_vx !=0 or previous_vy !=0):
-                skp = current_vx*previous_vx + current_vy*previous_vy
-                if skp < 0:
+            # Detect movement reversal.
+            if (
+                (current_vx != 0 or current_vy != 0)
+                and
+                (previous_vx != 0 or previous_vy != 0)
+            ):
+                dot_product = (
+                    current_vx * previous_vx
+                    + current_vy * previous_vy
+                )
+
+                if dot_product < 0:
                     events.append(e.REVERSED_DIRECTION)
-           
+
             self.previous_old_position = old_pos
-            # Update velocity for next step's reversal detection
-            self.previous_velocity = (new_pos[0] - old_pos[0], new_pos[1] - old_pos[1])
-         
-            '''
-            old_others = [o[-1] for o in old_game_state["others"] if o[-1] is not None]
-            new_others = [o[-1] for o in new_game_state["others"] if o[-1] is not None]
-            if old_others and new_others:
-                old_enemy_min = min(abs(old_pos[0] - ox) + abs(old_pos[1] - oy) for ox, oy in old_others)
-                new_enemy_min = min(abs(new_pos[0] - ox) + abs(new_pos[1] - oy) for ox, oy in new_others)
-                if new_enemy_min < old_enemy_min:
-                    events.append(e.MOVED_CLOSE_TO_ENEMY)
-                elif new_enemy_min > old_enemy_min:
-                    events.append(e.MOVED_AWAY_FROM_ENEMY)
-            '''
+            self.previous_velocity = current_velocity
+
+    # ------------------------------------------------------------
+    # Calculate reward
+    # ------------------------------------------------------------
+
     reward = reward_from_events(self, events)
+
+    # ------------------------------------------------------------
+    # Detect completion
+    #
+    # Give the bonus exactly when the last coin is collected.
+    # ------------------------------------------------------------
+
+    if (
+        old_game_state is not None
+        and new_game_state is not None
+    ):
+        old_coins = len(old_game_state["coins"])
+        new_coins = len(new_game_state["coins"])
+
+        if old_coins > 0 and new_coins == 0:
+            reward += ALL_COINS_BONUS
+
+            if getattr(self, "log_dqn_details", False):
+                self.logger.info(
+                    "All coins collected: completion bonus +%.2f",
+                    ALL_COINS_BONUS,
+                )
+
+    # ------------------------------------------------------------
+    # Convert states into neural-network features
+    # ------------------------------------------------------------
+
     old_feats = state_to_features(old_game_state)
     new_feats = state_to_features(new_game_state)
 
     if old_feats is not None:
+
         old_grid, old_scalar = old_feats
+
         if new_feats is not None:
             new_grid, new_scalar = new_feats
             next_action_mask = _policy_action_mask(new_game_state)
+
         else:
-            new_grid, new_scalar = None, None
+            new_grid = None
+            new_scalar = None
             next_action_mask = None
 
-        # store transition (use copies to avoid accidental mutation)
-        self.replay_buffer.append(Transition(old_grid.copy(), old_scalar.copy(),
-                                             self_action,
-                                             None if new_grid is None else new_grid.copy(),
-                                             None if new_scalar is None else new_scalar.copy(),
-                                             None if next_action_mask is None else next_action_mask.copy(),
-                                             reward))
+        # --------------------------------------------------------
+        # Store transition
+        # --------------------------------------------------------
 
-        # update step counter and train periodically to reduce compute cost
+        self.replay_buffer.append(
+            Transition(
+                old_grid.copy(),
+                old_scalar.copy(),
+                self_action,
+                None if new_grid is None else new_grid.copy(),
+                None if new_scalar is None else new_scalar.copy(),
+                None if next_action_mask is None
+                else next_action_mask.copy(),
+                reward,
+            )
+        )
+
+        # --------------------------------------------------------
+        # Training
+        # --------------------------------------------------------
+
         self.steps_done += 1
+
         if self.steps_done % TRAIN_EVERY_STEPS == 0:
             optimize_model(self)
 
-        # occasionally update target network
-        if self.steps_done % TARGET_UPDATE == 0:
-            self.target_net.load_state_dict(self.policy_net.state_dict())
+        # --------------------------------------------------------
+        # Target network update
+        # --------------------------------------------------------
 
-    
+        if self.steps_done % TARGET_UPDATE == 0:
+            self.target_net.load_state_dict(
+                self.policy_net.state_dict()
+            )
+
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
-    #self.round_coins_collected += events.count(e.COIN_COLLECTED)
-    #self.round_number_kills += events.count(e.KILLED_OPPONENT)
     last_state = state_to_features(last_game_state)
     reward = reward_from_events(self, events)
+
+    # Inject actual game score as a terminal bonus so the Bellman target
+    # is directly anchored to the real score, not only the step-reward proxy.
+    actual_score = last_game_state["self"][1] if last_game_state is not None else 0
+    terminal_bonus = float(actual_score) * SCORE_TERMINAL_WEIGHT
+    reward += terminal_bonus
+    if getattr(self, "log_dqn_details", False):
+        self.logger.info(
+            "End of round: actual_score=%d terminal_bonus=%.3f total_terminal_reward=%.3f",
+            actual_score, terminal_bonus, reward,
+        )
+
     # terminal state: next_state is None
     if last_state is not None:
         last_grid, last_scalar = last_state
@@ -357,7 +602,7 @@ def reward_from_events(self, events: List[str]) -> float:
 
         e.WAITED: -0.05,
         e.INVALID_ACTION: 0.0,
-        e.BOMB_DROPPED: 0.1,
+        e.BOMB_DROPPED: 0.0,
         e.BOMB_EXPLODED: 0.0,
         e.SURVIVED_ROUND: 0.0,
     }
@@ -370,7 +615,7 @@ def reward_from_events(self, events: List[str]) -> float:
 
     # Prevent step-wise shaping terms from overshadowing major outcomes.
     shaping_sum = float(np.clip(shaping_sum, -0.25, 0.25))
-    reward_sum = major_sum + shaping_sum
+    reward_sum = major_sum + shaping_sum - TIME_PENALTY
 
     if getattr(self, "log_dqn_details", False):
         self.logger.info(
