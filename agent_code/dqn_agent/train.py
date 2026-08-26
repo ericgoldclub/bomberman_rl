@@ -128,7 +128,7 @@ def setup_training(self):
     # For convenience: keep epsilon parameters on self (can be tuned)
     self.epsilon_start = 1.0
     self.epsilon_end = 0.05
-    self.epsilon_decay = 27323261
+    self.epsilon_decay = 683082
 
     # Attach a helper to compute current epsilon
     self.get_epsilon = lambda: self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-1.0 * self.steps_done / self.epsilon_decay)
@@ -215,9 +215,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             )
             if has_valid_move:
                 events.append(e.SAFE_WAIT)
-        '''
-
-        
+       '''
         if old_game_state is not None:
             old_pos = old_game_state["self"][-1]
             new_pos = new_game_state["self"][-1]
@@ -327,14 +325,15 @@ def reward_from_events(self, events: List[str]) -> float:
     # - shaping terms (movement heuristics), which are clipped per step
     major_rewards = {
         e.COIN_COLLECTED: 1.0,
-        e.CRATE_DESTROYED: 0.35,
-        e.KILLED_OPPONENT: -1.2,
+        
+        e.KILLED_OPPONENT: 2.0,
         e.KILLED_SELF: -1.2,
         e.GOT_KILLED: -5.0,
         e.COIN_FOUND: 0.10,
         e.OPPONENT_ELIMINATED: 1.0,
     }
     shaping_rewards = {
+        e.CRATE_DESTROYED: 0.2,
 
         e.REVERSED_DIRECTION: -0.05,
 
@@ -342,11 +341,11 @@ def reward_from_events(self, events: List[str]) -> float:
         e.MOVED_AWAY_FROM_ENEMY: 0.00,
 
         e.IN_DANGER: -0.10,
-        e.SAFE_WAIT: -0.00,
+        e.SAFE_WAIT: 0.00,
 
-        e.WAITED: -0.05,
+        e.WAITED: 0.0,
         e.INVALID_ACTION: 0.0,
-        e.BOMB_DROPPED: -0.1,
+        e.BOMB_DROPPED: 0.0,
         e.BOMB_EXPLODED: 0.0,
         e.SURVIVED_ROUND: 0.0,
     }
