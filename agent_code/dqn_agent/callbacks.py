@@ -16,7 +16,7 @@ DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
 VERBOSE_TRAIN_LOGS = True
 
 GRID_CHANNELS = 10  # number of channels in the grid input to the DQN
-SCALAR_FEATURES = 8  # number of scalar features input to the DQN
+SCALAR_FEATURES = 8 + len(ACTIONS)  # base scalar features + one-hot last action
 
 
 
@@ -37,14 +37,14 @@ def look_for_targets(free_space, start, targets, logger=None):
     """
     if len(targets) == 0: return None
 
-    frontier = [start]
+    frontier = deque([start])
     parent_dict = {start: start}
     dist_so_far = {start: 0}
     best = start
     best_dist = np.sum(np.abs(np.subtract(targets, start)), axis=1).min()
 
     while len(frontier) > 0:
-        current = frontier.pop(0)
+        current = frontier.popleft()
         # Find distance from current position to all targets, track closest
         d = np.sum(np.abs(np.subtract(targets, current)), axis=1).min()
         if d + dist_so_far[current] <= best_dist:
@@ -54,10 +54,9 @@ def look_for_targets(free_space, start, targets, logger=None):
             # Found path to a target's exact position, mission accomplished!
             best = current
             break
-        # Add unexplored free neighboring tiles to the queue in a random order
+        # Add unexplored free neighboring tiles to the queue
         x, y = current
         neighbors = [(x, y) for (x, y) in [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)] if free_space[x, y]]
-        random.shuffle(neighbors)
         for neighbor in neighbors:
             if neighbor not in parent_dict:
                 frontier.append(neighbor)
@@ -93,6 +92,9 @@ def setup(self):
     )
     self.grid_size = (s.COLS, s.ROWS)
     self.log_dqn_details = VERBOSE_TRAIN_LOGS
+    self._last_action_index = ACTIONS.index("WAIT")
+    self._cached_state_key = None
+    self._cached_features = None
 
     from .train import DQN_net
 
@@ -119,10 +121,15 @@ def setup(self):
 
     if os.path.isfile(load_path):
         checkpoint = torch.load(load_path, map_location=self.device,)
-
-        self.policy_net.load_state_dict(checkpoint)
-
-        self.logger.info("Loaded DQN model from %s", load_path)
+        try:
+            self.policy_net.load_state_dict(checkpoint)
+            self.logger.info("Loaded DQN model from %s", load_path)
+        except RuntimeError as exc:
+            self.logger.warning(
+                "Could not load model from %s due to architecture mismatch (%s). Using freshly initialized network.",
+                load_path,
+                exc,
+            )
 
     else:
         self.logger.warning(
@@ -261,7 +268,7 @@ def _nearest_distance_via_look_for_targets(
 
 
 
-def state_to_features(game_state: dict) -> np.array:
+def state_to_features(game_state: dict, last_action_index: int | None = None) -> np.array:
     '''
     Returning (grid,scalar) for a given game_state 
 
@@ -382,19 +389,22 @@ def state_to_features(game_state: dict) -> np.array:
 
     enemies_remaining = float(len(others)) / max(1.0, float(s.MAX_AGENTS - 1))
 
-    free_space = field == 0
-    distance_map = _distance_map_on_free_space(free_space, (x, y))
-
-    coin_distances = []
     valid_coins = []
     for cx, cy in coins:
         if 0 <= cx < X and 0 <= cy < Y:
             valid_coins.append((cx, cy))
+    if valid_coins:
+        free_space = field == 0
+        distance_map = _distance_map_on_free_space(free_space, (x, y))
+        coin_distances = []
+        for cx, cy in valid_coins:
             distance = distance_map[cx, cy]
             if np.isfinite(distance):
                 coin_distances.append(float(distance))
+    else:
+        coin_distances = []
 
-    if coin_distances:
+    if coin_distances and valid_coins:
         nearest_coin_distance = _nearest_distance_via_look_for_targets(
             distance_map,
             free_space,
@@ -433,13 +443,45 @@ def state_to_features(game_state: dict) -> np.array:
         farthest_coin_distance,
     ], dtype=np.float32)
 
+    if last_action_index is None:
+        last_action_index = ACTIONS.index("WAIT")
+    last_action_index = int(np.clip(last_action_index, 0, len(ACTIONS) - 1))
+    last_action_one_hot = np.zeros(len(ACTIONS), dtype=np.float32)
+    last_action_one_hot[last_action_index] = 1.0
+    scalar = np.concatenate([scalar, last_action_one_hot], axis=0).astype(np.float32)
+
     return grid, scalar
+
+
+def state_to_features_cached(self, game_state: dict):
+    """Cache the latest state->feature conversion to avoid duplicate work per step."""
+    if game_state is None:
+        return None
+
+    step = game_state.get("step", None)
+    self_state = game_state.get("self", None)
+    self_pos = self_state[-1] if self_state is not None else None
+    state_key = (id(game_state), step, self_pos, self._last_action_index)
+    if (
+        getattr(self, "_cached_state_key", None) == state_key
+        and getattr(self, "_cached_features", None) is not None
+    ):
+        return self._cached_features
+
+    feats = state_to_features(game_state, last_action_index=self._last_action_index)
+    if feats is None:
+        return None
+
+    cached = feats
+    self._cached_state_key = state_key
+    self._cached_features = cached
+    return cached
 
 
 
 def act(self, game_state: dict) -> str:
 
-    feats = state_to_features(game_state)
+    feats = state_to_features_cached(self, game_state)
     if feats is None:
         self.logger.debug("Game state is None, returning WAIT")
         return 'WAIT'
@@ -476,6 +518,7 @@ def act(self, game_state: dict) -> str:
                     f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
                     f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
                 )
+            self._last_action_index = ACTIONS.index(chosen_action)
             return chosen_action
 
         with torch.no_grad():
@@ -492,6 +535,7 @@ def act(self, game_state: dict) -> str:
                 f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
                 f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
             )
+        self._last_action_index = ACTIONS.index(chosen_action)
         return chosen_action
     except Exception as exc:
         self.logger.warning("DQN act failed, falling back to table or random policy : %s", exc)
@@ -502,4 +546,5 @@ def act(self, game_state: dict) -> str:
                 f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
                 f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, fallback=random"
             )
+        self._last_action_index = ACTIONS.index(chosen_action)
         return chosen_action

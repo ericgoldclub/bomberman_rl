@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BEST_MODEL_FILE, TRAINING_MODEL_FILE, _feature_dimensions, _is_valid_action, _policy_action_mask
+from .callbacks import ACTIONS, state_to_features_cached, MODEL_FILE, BEST_MODEL_FILE, TRAINING_MODEL_FILE, _feature_dimensions, _is_valid_action, _policy_action_mask
 import events as e
 import settings as s
 
@@ -23,20 +23,49 @@ Transition = namedtuple(
 # Hyperparameters
 BUFFER_SIZE = 100_000
 BATCH_SIZE = 64
-GAMMA = 0.99
-LR = 1e-4
-TARGET_UPDATE = 8192  # steps
-MIN_REPLAY_SIZE = 5_000
-TRAIN_EVERY_STEPS = 16
+GAMMA = 0.98
+LR = 2e-4
+TARGET_UPDATE = 4096  # gradient steps
+MIN_REPLAY_SIZE = 1_500
+TRAIN_EVERY_STEPS = 8
 # Weight applied to the actual game score injected as a terminal reward bonus.
 # Keeps it on the same scale as per-step rewards (max score ~15, max_steps=200).
-SCORE_TERMINAL_WEIGHT = 1.0 / 10.0
-
+SCORE_TERMINAL_WEIGHT = 0.0
 ALL_COINS_BONUS = 2.0
+END_OF_ROUND_OPT_STEPS = 1
+ACTION_TO_INDEX = {action: idx for idx, action in enumerate(ACTIONS)}
+EPSILON_START = 1.0
+EPSILON_END = 0.06
+# For ~1000 games x ~200 steps = ~200k decisions:
+# epsilon approaches its floor well before training ends.
+EPSILON_HALF_LIFE = 20_000
 
 
 
-from .Networks import DQN_deep as DQN_net
+from .Networks import DQN as DQN_net
+
+MAJOR_REWARDS = {
+    e.COIN_COLLECTED: 1.0,
+    e.KILLED_OPPONENT: 5.0,
+    e.KILLED_SELF: -5.0,
+    e.GOT_KILLED: -5.0,
+    e.COIN_FOUND: 0.10,
+    e.OPPONENT_ELIMINATED: 1.0,
+    e.CRATE_DESTROYED: 0.6,
+}
+
+SHAPING_REWARDS = {
+    e.REVERSED_DIRECTION: -0.1,
+    e.MOVED_CLOSE_TO_ENEMY: 0.00,
+    e.MOVED_AWAY_FROM_ENEMY: 0.00,
+    e.IN_DANGER: -0.10,
+    e.SAFE_WAIT: 0.00,
+    e.WAITED: -0.05,
+    e.INVALID_ACTION: 0.0,
+    e.BOMB_DROPPED: -0.5,
+    e.BOMB_EXPLODED: 0.0,
+    e.SURVIVED_ROUND: 0.0,
+}
 
 def setup_training(self):
     """Initialise training-related objects for the agent."""
@@ -50,6 +79,7 @@ def setup_training(self):
     self.previous_old_position = None
     self.previous_velocity = (0,0)
     self.position_history = deque(maxlen=4)
+    self._last_action_index = ACTION_TO_INDEX["WAIT"]
 
 
     if not hasattr(self, "policy_net"):
@@ -67,9 +97,9 @@ def setup_training(self):
 
     self.loss_fn = nn.SmoothL1Loss()
 
-    self.epsilon_start = 1.0
-    self.epsilon_end = 0.04
-    self.tau = 35054  # Example value, replace with actual calculation if needed
+    self.epsilon_start = EPSILON_START
+    self.epsilon_end = EPSILON_END
+    self.tau = EPSILON_HALF_LIFE
 
 
     def get_epsilon_value(agent):
@@ -110,10 +140,7 @@ def optimize_model(self):
     ).astype(np.float32)
 
     # Store the action as an integer index.
-    actions_np = np.array(
-        [ACTIONS.index(transition.action) for transition in batch],
-        dtype=np.int64,
-    )
+    actions_np = np.array([ACTION_TO_INDEX[transition.action] for transition in batch], dtype=np.int64)
 
     rewards_np = np.array(
         [transition.reward for transition in batch],
@@ -315,10 +342,12 @@ def game_events_occurred(
 ):
     """Called once per step to calculate reward and store transition."""
 
-    self.logger.debug(
-        f'Encountered game event(s) {", ".join(map(repr, events))} '
-        f'in step {new_game_state["step"]}'
-    )
+    if self.logger.isEnabledFor(10):
+        self.logger.debug(
+            'Encountered game event(s) %s in step %s',
+            ", ".join(map(repr, events)),
+            new_game_state["step"],
+        )
 
     events = list(events)
 
@@ -417,8 +446,9 @@ def game_events_occurred(
     # Convert states into neural-network features
     # ------------------------------------------------------------
 
-    old_feats = state_to_features(old_game_state)
-    new_feats = state_to_features(new_game_state)
+    old_feats = state_to_features_cached(self, old_game_state)
+    self._last_action_index = ACTION_TO_INDEX.get(self_action, ACTION_TO_INDEX["WAIT"])
+    new_feats = state_to_features_cached(self, new_game_state)
 
     if old_feats is not None:
 
@@ -439,13 +469,12 @@ def game_events_occurred(
 
         self.replay_buffer.append(
             Transition(
-                old_grid.copy(),
-                old_scalar.copy(),
+                old_grid,
+                old_scalar,
                 self_action,
-                None if new_grid is None else new_grid.copy(),
-                None if new_scalar is None else new_scalar.copy(),
-                None if next_action_mask is None
-                else next_action_mask.copy(),
+                new_grid,
+                new_scalar,
+                next_action_mask,
                 reward,
             )
         )
@@ -459,18 +488,10 @@ def game_events_occurred(
         if self.steps_done % TRAIN_EVERY_STEPS == 0:
             optimize_model(self)
 
-        # --------------------------------------------------------
-        # Target network update
-        # --------------------------------------------------------
-
-        if self.steps_done % TARGET_UPDATE == 0:
-            self.target_net.load_state_dict(
-                self.policy_net.state_dict()
-            )
-
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
-    last_state = state_to_features(last_game_state)
+    self._last_action_index = ACTION_TO_INDEX.get(last_action, ACTION_TO_INDEX["WAIT"])
+    last_state = state_to_features_cached(self, last_game_state)
     reward = reward_from_events(self, events)
 
     # Inject actual game score as a terminal bonus so the Bellman target
@@ -488,10 +509,10 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # terminal state: next_state is None
     if last_state is not None:
         last_grid, last_scalar = last_state
-        self.replay_buffer.append(Transition(last_grid.copy(), last_scalar.copy(), last_action, None, None, None, reward))
+        self.replay_buffer.append(Transition(last_grid, last_scalar, last_action, None, None, None, reward))
 
     # Do some final optimization passes
-    for _ in range(10):
+    for _ in range(END_OF_ROUND_OPT_STEPS):
         optimize_model(self)
 
     # Save latest policy network to MODEL_FILE; TRAINING_MODEL_FILE is the read-only start checkpoint
@@ -529,40 +550,15 @@ def reward_from_events(self, events: List[str]) -> float:
     # Split rewards into:
     # - major outcomes (coin collection / death), which should dominate learning
     # - shaping terms (movement heuristics), which are clipped per step
-    major_rewards = {
-        e.COIN_COLLECTED: 1.0,
-        e.KILLED_OPPONENT: 5.0,
-        e.KILLED_SELF: -5.0,
-        e.GOT_KILLED: -5.0,
-        e.COIN_FOUND: 0.10,
-        e.OPPONENT_ELIMINATED: 1.0,
-        e.CRATE_DESTROYED: 0.6,
-    }
-    shaping_rewards = {
-
-        e.REVERSED_DIRECTION: -0.06,
-
-        e.MOVED_CLOSE_TO_ENEMY: 0.00,
-        e.MOVED_AWAY_FROM_ENEMY: 0.00,
-
-        e.IN_DANGER: -0.10,
-        e.SAFE_WAIT: 0.00,
-
-        e.WAITED: -0.06,
-        e.INVALID_ACTION: 0.0,
-        e.BOMB_DROPPED: -0.5,
-        e.BOMB_EXPLODED: 0.0,
-        e.SURVIVED_ROUND: 0.0,
-    }
-    TIME_PENALTY = 0.01  # small penalty to encourage faster completion
+    TIME_PENALTY = 0.00  # small penalty to encourage faster completion
     major_sum = 0.0
     shaping_sum = 0.0
     for event in events:
-        major_sum += major_rewards.get(event, 0.0)
-        shaping_sum += shaping_rewards.get(event, 0.0)
+        major_sum += MAJOR_REWARDS.get(event, 0.0)
+        shaping_sum += SHAPING_REWARDS.get(event, 0.0)
 
     # Prevent step-wise shaping terms from overshadowing major outcomes.
-    shaping_sum = float(np.clip(shaping_sum, -0.25, 0.25))
+    shaping_sum = float(np.clip(shaping_sum, -0.3, 0.3))
     reward_sum = major_sum + shaping_sum - TIME_PENALTY
 
     if getattr(self, "log_dqn_details", False):
