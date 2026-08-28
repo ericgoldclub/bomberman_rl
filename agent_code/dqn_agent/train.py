@@ -36,7 +36,7 @@ ALL_COINS_BONUS = 2.0
 
 
 
-from .Networks import DQN
+from .Networks import DQN_deep as DQN_net
 
 def setup_training(self):
     """Initialise training-related objects for the agent."""
@@ -68,24 +68,14 @@ def setup_training(self):
     self.loss_fn = nn.SmoothL1Loss()
 
     self.epsilon_start = 1.0
-    self.epsilon_mid = 0.5
-    self.epsilon_end = 0.05
-    self.epsilon_mid_step = 4000
-    self.half_life = 4000
+    self.epsilon_end = 0.04
+    self.tau = 35054  # Example value, replace with actual calculation if needed
+
 
     def get_epsilon_value(agent):
-        """Two-stage epsilon schedule for a 400-step game.
-
-        - 1.0 -> 0.5 over the first 4,000 steps
-        - then exponential decay toward 0.05 with a half-life of 4,000 steps
-        """
-        if agent.steps_done < agent.epsilon_mid_step:
-            progress = agent.steps_done / max(1, agent.epsilon_mid_step)
-            return agent.epsilon_start - (agent.epsilon_start - agent.epsilon_mid) * progress
-
-        decay_steps = max(agent.steps_done - agent.epsilon_mid_step, 0)
-        return agent.epsilon_end + (agent.epsilon_mid - agent.epsilon_end) * np.exp(
-            -np.log(2.0) * decay_steps / agent.half_life
+        decay_steps = agent.steps_done
+        return agent.epsilon_end + (agent.epsilon_start - agent.epsilon_end) * np.exp(
+            -np.log(2.0) * decay_steps / agent.tau
         )
 
     self.get_epsilon = lambda: get_epsilon_value(self)
@@ -550,7 +540,7 @@ def reward_from_events(self, events: List[str]) -> float:
     }
     shaping_rewards = {
 
-        e.REVERSED_DIRECTION: -0.05,
+        e.REVERSED_DIRECTION: -0.06,
 
         e.MOVED_CLOSE_TO_ENEMY: 0.00,
         e.MOVED_AWAY_FROM_ENEMY: 0.00,
