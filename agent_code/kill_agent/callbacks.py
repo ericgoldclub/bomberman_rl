@@ -6,15 +6,15 @@ import numpy as np
 
 from collections import deque
 
-from agent_code.dqn_coin_burst_agent.callbacks import can_hit_crate_with_bomb
+
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 MODEL_FILE = os.path.join(os.path.dirname(__file__), "kill_agent_saved_model.pt")
 MOVEMENT_DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 DIRECTIONS = [*MOVEMENT_DIRECTIONS, (0, 0)]  # UP, RIGHT, DOWN, LEFT, WAIT
 
-BOARD_CHANNELS = 9
-VECTOR_DIM = 13
+BOARD_CHANNELS = 10
+VECTOR_DIM = 20
 BOARD_SIZE = 17
 
 BOMB_POWER = 3
@@ -27,23 +27,21 @@ def valid_action_mask(game_state):
     _, _, bombs_left, (x, y) = game_state["self"]
 
     danger = bomb_danger_tiles(field, bombs)
+    explosion_times = bomb_explosion_times(field, bombs)
 
     mask = np.ones(len(ACTIONS), dtype=bool)
 
     for i, action in enumerate(ACTIONS):
         if action == 'BOMB':
-            mask[i] = bool(
-                bombs_left
-                and (
-                    can_hit_crate_with_bomb(field, x, y)
-                    or can_hit_enemy_with_bomb(
-                        field,
-                        x,
-                        y,
-                        [pos for _, _, _, pos in game_state["others"]]
-                    )
-                )
-            )
+            enemies = [pos for _, _, _, pos in game_state["others"] if pos is not None]
+
+            useful_against_enemy = can_hit_enemy_with_bomb(field, x, y, enemies)
+            useful_against_crate = can_hit_crate_with_bomb(field, x, y)
+            escape_possible = has_escape_after_bomb(field, bombs, explosion_map, (x, y))
+
+            close_to_enemy = any(abs(ex - x) + abs(ey - y) <= BOMB_POWER for ex, ey in enemies)
+
+            mask[i] = bombs_left > 0 and (useful_against_enemy or useful_against_crate or close_to_enemy) and escape_possible
             continue
             
 
@@ -93,27 +91,40 @@ def valid_action_mask(game_state):
     return mask
 
 
+def explosion_tiles_from_bomb(field, bomb_position, bomb_power=BOMB_POWER):
+    x, y = bomb_position
+    explosion_tiles = set()
+    explosion_tiles.add((x, y))
+
+    for dx, dy in MOVEMENT_DIRECTIONS:
+        for distance in range(1, bomb_power + 1):
+            nx = x + dx * distance
+            ny = y + dy * distance
+
+            if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
+                break
+            if field[nx, ny] == -1:
+                break
+            explosion_tiles.add((nx, ny))
+            if field[nx, ny] == 1:
+                break
+
+    return explosion_tiles
+
 def bomb_danger_tiles(field, bombs, bomb_power=BOMB_POWER):
-    danger = set()
+    danger_tiles = set()
+    for bomb_position, _ in bombs:
+        danger_tiles.update(explosion_tiles_from_bomb(field, bomb_position, bomb_power))
+    return danger_tiles
 
-    for (bx, by), timer in bombs:
-        danger.add((bx, by))
-
-        for dx, dy in MOVEMENT_DIRECTIONS:
-            for distance in range(1, bomb_power + 1):
-                nx = bx + dx * distance
-                ny = by + dy * distance
-
-                if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
-                    break
-                if field[nx, ny] == -1:
-                    break
-                danger.add((nx, ny))
-
-                if field[nx, ny] == 1:
-                    break
-    return danger
-
+def bomb_explosion_times(field, bombs, bomb_power=BOMB_POWER):
+    explosion_times = {}
+    for bomb_position, timer in bombs:
+        explosion_tiles = explosion_tiles_from_bomb(field, bomb_position, bomb_power)
+        for tile in explosion_tiles:
+            if tile not in explosion_times or timer < explosion_times[tile]:
+                explosion_times[tile] = timer
+    return explosion_times
 
 
 
@@ -124,9 +135,14 @@ def board_to_channels(game_state):
     bombs = game_state["bombs"]
     explosion_map = game_state["explosion_map"]
     _, _, _, (x, y) = game_state["self"]
-
     board = np.zeros((BOARD_CHANNELS, field.shape[0], field.shape[1]), dtype=np.float32)
+    
 
+    for _, _, _, (ex, ey) in game_state["others"]:
+        if (ex, ey) is not None:
+            board[9, ex, ey] = 1.0  # other agents
+
+    
     board[0] = field == -1  # walls
     board[1] = field == 1   # crates
     board[8] = field == 0   # free space
@@ -263,6 +279,52 @@ def useful_bomb_positions(field):
         if field[x, y] == 0 and can_hit_crate_with_bomb(field, x, y)
     ]
 
+def has_escape_after_bomb(field, bombs, explosion_map, start, max_depth = BOMB_TIMER + 2):
+    start = tuple(start)
+    simulated_bombs = list(bombs) + [(start, BOMB_TIMER)]
+    explosion_times = bomb_explosion_times(field, simulated_bombs)
+    bomb_pos = set(pos for pos, _ in simulated_bombs)
+
+    frontier = deque([(start, 0)])
+    visited = {start}
+
+    while frontier:
+        (x,y), depth = frontier.popleft()
+
+        explosion_time = explosion_times.get((x, y), float('inf'))
+        currently_exploding = explosion_map[x, y] > 0
+        explodes_now = explosion_time is not None and explosion_time <= depth
+
+        if depth > 0 and not currently_exploding and not explodes_now:
+            future_safe = explosion_time is None or explosion_time > depth + 1
+            if future_safe:
+                return True
+
+        if depth >= max_depth:
+            continue    
+
+        for dx, dy in MOVEMENT_DIRECTIONS:
+            nx, ny = x + dx, y + dy
+            next_pos = (nx, ny)
+            next_depth = depth + 1
+
+            if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
+                continue
+            if field[nx, ny] != 0:
+                continue
+            if (nx, ny) in visited:
+                continue
+
+            next_explosion_time = explosion_times.get(next_pos, float('inf'))
+            if explosion_map[nx, ny] > 0 or next_explosion_time <= next_depth:
+                continue
+            if next_ex
+
+            visited.add((nx, ny))
+            frontier.append(((nx, ny), depth + 1))
+
+    return False
+
 def state_to_features(game_state: dict, position_history=None) -> np.array:
     if game_state is None:
         return None
@@ -272,6 +334,9 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
     bombs = game_state["bombs"]
     explosion_map = game_state["explosion_map"]
     _, _, bombs_left, (x, y) = game_state["self"]
+    enemies = [pos for _, _, _, pos in game_state["others"] if pos is not None]
+
+    
 
     coin_direction = look_for_targets(field == 0, (x, y), coins)
     if coin_direction is None:
@@ -309,7 +374,26 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
         two_back_dx = (tx - x) / BOARD_SIZE
         two_back_dy = (ty - y) / BOARD_SIZE
 
-    steps = game_state.get("steps", 0)
+    steps = game_state.get("step", 0)
+
+    
+    enemy_direction = look_for_targets(field == 0, (x, y), enemies)
+
+    if enemy_direction is None:
+        enemy_dx, enemy_dy = 0, 0
+    else:
+        enemy_dx = enemy_direction[0] - x
+        enemy_dy = enemy_direction[1] - y
+
+    if enemies:
+        enemy_distance = [abs(enemy_dx) + abs(enemy_dy) for enemy_dx, enemy_dy in [(ex - x, ey - y) for ex, ey in enemies]]
+        closest_enemy_distance = min(enemy_distance)
+    else:
+        closest_enemy_distance = BOARD_SIZE * 2  # Max possible distance on the board
+
+    enemy_in_bomb_range = int(can_hit_enemy_with_bomb(field, x, y, enemies))
+    safe_after_bomb = int(has_escape_after_bomb(field, bombs, explosion_map, (x, y)))
+    good_kill_opportunity = int(enemy_in_bomb_range and safe_after_bomb)
     
     vector = np.array([
         coin_dx / BOARD_SIZE,
@@ -325,6 +409,13 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
         two_back_dx,
         two_back_dy,
         steps/400,
+        closest_enemy_distance / BOARD_SIZE,
+        enemy_in_bomb_range,
+        safe_after_bomb,
+        good_kill_opportunity,
+        enemy_dx / BOARD_SIZE,
+        enemy_dy / BOARD_SIZE,
+        len(enemies)/3
         #int(can_hit_enemy_with_bomb(field, x, y, [pos for _, _, _, pos in game_state["others"]]))
     ], dtype=np.float32)
 

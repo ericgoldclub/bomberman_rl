@@ -9,7 +9,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .callbacks import ACTIONS, state_to_features, MODEL_FILE, BOARD_CHANNELS, VECTOR_DIM, BOARD_SIZE, useful_bomb_positions, valid_action_mask
+from .callbacks import (ACTIONS, state_to_features, MODEL_FILE, BOARD_CHANNELS, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb)
+
 import events as e
 
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward', 'next_action_mask'))  # Added next_action to the Transition namedtuple
@@ -180,8 +181,15 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 events.append(e.MOVED_AWAY_FROM_CRATE)
 
     if self_action == 'BOMB':
-        if old_state is not None and old_state[1][4] == 1:  # can destroy crate
-            events.append(e.USEFUL_BOMB_DROPPED)
+        enemies = [pos for _, _, _, pos in new_game_state["others"] if pos is not None]
+        old_pos = old_game_state['self'][3]
+        field = new_game_state["field"]
+        bombs = new_game_state["bombs"]
+        explosion_map = old_game_state["explosion_map"]
+
+        if (can_hit_enemy_with_bomb(field, old_pos[0], old_pos[1], enemies) and has_escape_after_bomb(field, bombs, explosion_map, old_pos)):
+            events.append(e.USEFUL_BOMB_DROPPED
+                        )
         else:
             events.append(e.USELESS_BOMB_DROPPED)
 
@@ -269,25 +277,25 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
 def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
-        e.COIN_COLLECTED: 30,
-        e.BOMB_DROPPED: 10,
-        e.KILLED_OPPONENT: 100,
-        e.MOVED_CLOSE_TO_ENEMY: 5,
-        e.MOVED_AWAY_FROM_ENEMY: -5,
+        e.COIN_COLLECTED: 5,
+        #e.BOMB_DROPPED: 10,
+        e.KILLED_OPPONENT: 200,
+        e.MOVED_CLOSE_TO_ENEMY: 20,
+        e.MOVED_AWAY_FROM_ENEMY: -20,
         #e.COIN_FOUND: 10,
         #e.CRATE_DESTROYED: 1,
-        #e.USEFUL_BOMB_DROPPED: 2,
-        #e.USELESS_BOMB_DROPPED: -2,
+        e.USEFUL_BOMB_DROPPED: 10,
+        e.USELESS_BOMB_DROPPED: -25,
         e.MOVED_CLOSE_TO_COIN: 2,
         e.MOVED_AWAY_FROM_COIN: -2,
         #e.MOVED_TOWARDS_CRATE: 0,
         #e.MOVED_AWAY_FROM_CRATE: 0 ,
-        e.INVALID_ACTION: -8,
-        e.KILLED_SELF: -50,
-        e.GOT_KILLED: -50,
-        e.WAITED: -5,
-        e.OSCILLATION: -5,
-        e.STEP_PENALTY: -0.2,  # Small penalty for each step to encourage faster completion
+        e.INVALID_ACTION: -15,
+        e.KILLED_SELF: -150,
+        e.GOT_KILLED: -100,
+        e.WAITED: -10,
+        e.OSCILLATION: -20,
+        e.STEP_PENALTY: -0.1,  # Small penalty for each step to encourage faster completion
         }
     reward_sum = 0
     for event in events:
