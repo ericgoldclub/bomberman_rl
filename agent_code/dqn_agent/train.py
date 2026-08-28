@@ -21,28 +21,31 @@ Transition = namedtuple(
 )
 
 # Hyperparameters
-BUFFER_SIZE = 100_000
+BUFFER_SIZE = 50_000
 BATCH_SIZE = 64
 GAMMA = 0.98
-LR = 2e-4
-TARGET_UPDATE = 4096  # gradient steps
-MIN_REPLAY_SIZE = 1_500
+LR = 1e-4
+TARGET_UPDATE = 8192  # gradient steps
+MIN_REPLAY_SIZE = 5000
 TRAIN_EVERY_STEPS = 8
 # Weight applied to the actual game score injected as a terminal reward bonus.
 # Keeps it on the same scale as per-step rewards (max score ~15, max_steps=200).
-SCORE_TERMINAL_WEIGHT = 0.0
+SCORE_TERMINAL_WEIGHT = 0.1
 ALL_COINS_BONUS = 2.0
-END_OF_ROUND_OPT_STEPS = 1
+
+END_OF_ROUND_OPT_STEPS = 10
 ACTION_TO_INDEX = {action: idx for idx, action in enumerate(ACTIONS)}
+ALL_COINS_TIME_BONUS_WEIGHT = 1.0 # Only used to determine best model
+
 EPSILON_START = 1.0
 EPSILON_END = 0.06
 # For ~1000 games x ~200 steps = ~200k decisions:
 # epsilon approaches its floor well before training ends.
-EPSILON_HALF_LIFE = 20_000
+EPSILON_HALF_LIFE = s.MAX_STEPS*300
 
 
 
-from .Networks import DQN as DQN_net
+from .Networks import DQN_prev as DQN_net
 
 MAJOR_REWARDS = {
     e.COIN_COLLECTED: 1.0,
@@ -55,7 +58,7 @@ MAJOR_REWARDS = {
 }
 
 SHAPING_REWARDS = {
-    e.REVERSED_DIRECTION: -0.1,
+    e.REVERSED_DIRECTION: -0.05,
     e.MOVED_CLOSE_TO_ENEMY: 0.00,
     e.MOVED_AWAY_FROM_ENEMY: 0.00,
     e.IN_DANGER: -0.10,
@@ -519,12 +522,23 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     os.makedirs(os.path.dirname(MODEL_FILE), exist_ok=True)
     torch.save(self.policy_net.state_dict(), MODEL_FILE)
 
-    current_score = self.round_coins_collected + self.round_number_kills * 5
+    current_score = float(self.round_coins_collected + self.round_number_kills * 5)
+    if (
+        last_game_state is not None
+        and len(last_game_state.get("coins", [])) == 0
+    ):
+        time_left = max(0, int(s.MAX_STEPS) - int(last_game_state.get("step", 0))) # remaining steps in the round after last coin was collected
+        time_left_fraction = float(time_left) / float(max(1, s.MAX_STEPS))
+        current_score += ALL_COINS_TIME_BONUS_WEIGHT * time_left_fraction
+        self.logger.info(
+            "All coins collected with %d steps remaining (%.3f fraction of total steps).",
+            time_left, time_left_fraction
+        )
     if current_score > self.best_score:
         self.best_score = current_score
         torch.save(self.policy_net.state_dict(), BEST_MODEL_FILE)
         self.logger.info(
-            "Saved new best model with score %d.",
+            "Saved new best model with score %.3f.",
             current_score,
         )
 
@@ -550,7 +564,7 @@ def reward_from_events(self, events: List[str]) -> float:
     # Split rewards into:
     # - major outcomes (coin collection / death), which should dominate learning
     # - shaping terms (movement heuristics), which are clipped per step
-    TIME_PENALTY = 0.00  # small penalty to encourage faster completion
+    TIME_PENALTY = 0.01  # small penalty to encourage faster completion
     major_sum = 0.0
     shaping_sum = 0.0
     for event in events:
