@@ -26,79 +26,17 @@ BATCH_SIZE = 64
 GAMMA = 0.99
 LR = 1e-4
 TARGET_UPDATE = 8192  # steps
-MIN_REPLAY_SIZE = 5000
-TRAIN_EVERY_STEPS = 8
+MIN_REPLAY_SIZE = 5_000
+TRAIN_EVERY_STEPS = 16
 # Weight applied to the actual game score injected as a terminal reward bonus.
 # Keeps it on the same scale as per-step rewards (max score ~15, max_steps=200).
 SCORE_TERMINAL_WEIGHT = 1.0 / 10.0
 
 ALL_COINS_BONUS = 2.0
-TIME_PENALTY = 0.01
 
 
-class DQN(nn.Module):
-    '''
-    The model combines a small CNN for grid channels with a MLP for scalar features,
-    such as bomb availability, target distances, and remaining time.
-    The outputs are Q-values for each action.
-    '''
-    def __init__(self, in_channels : int, grid_size: tuple[int, int] , scalar_size : int, n_actions : int):
-        super().__init__()
-        # CNN for grid channels
-        self.cnn = nn.Sequential(
-        nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(32, 64, kernel_size=3, padding=1),
-        nn.ReLU(),
 
-        nn.Conv2d(64, 64, kernel_size=3, padding=1),
-        nn.ReLU(),
-        )
-
-        with torch.no_grad():
-            dummy = torch.zeros(1, in_channels, grid_size[0], grid_size[1])
-            cnn_out_dim = int(self.cnn(dummy).flatten(1).shape[1])
-
-
-        # MLP for scalar features
-        self.scalar_fc = nn.Sequential(
-            nn.Linear(scalar_size, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-        )
-
-        # Final MLP to combine CNN and scalar features
-        combined_dim = cnn_out_dim + 32
-
-        self.shared = nn.Sequential(
-            nn.Linear(combined_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64), # output Q-values for each action
-            nn.ReLU(),
-        )
-
-        self.value = nn.Linear(64, 1)  # V(s)
-        self.advantage = nn.Linear(64, n_actions)  # A(s,a)
-
-
-    def forward(self, grid : torch.Tensor, scalar : torch.Tensor) -> torch.Tensor:
-
-
-        x = self.cnn(grid)  
-        x = torch.flatten(x, 1)
-
-        s = self.scalar_fc(scalar)  
-
-        x = torch.cat([x,s], dim=1) 
-        x = self.shared(x)
-
-        value = self.value(x)  
-        advantage = self.advantage(x) 
-
-        Q = value + advantage - advantage.mean(dim=1, keepdim=True)  
-
-        return Q
+from .Networks import DQN_deep as DQN_net
 
 def setup_training(self):
     """Initialise training-related objects for the agent."""
@@ -130,10 +68,19 @@ def setup_training(self):
     self.loss_fn = nn.SmoothL1Loss()
 
     self.epsilon_start = 1.0
-    self.epsilon_end = 0.05
-    self.epsilon_decay = 6856462
-    self.get_epsilon = lambda: self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-1.0 * self.steps_done / self.epsilon_decay)
+    self.epsilon_end = 0.04
+    self.tau = 35054  # Example value, replace with actual calculation if needed
 
+
+    def get_epsilon_value(agent):
+        decay_steps = agent.steps_done
+        return agent.epsilon_end + (agent.epsilon_start - agent.epsilon_end) * np.exp(
+            -np.log(2.0) * decay_steps / agent.tau
+        )
+
+    self.get_epsilon = lambda: get_epsilon_value(self)
+
+    
     self.logger.info(
         "Training initialized: buffer=%d, batch=%d, gamma=%.3f, lr=%g",
         BUFFER_SIZE,
@@ -530,6 +477,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # is directly anchored to the real score, not only the step-reward proxy.
     actual_score = last_game_state["self"][1] if last_game_state is not None else 0
     terminal_bonus = float(actual_score) * SCORE_TERMINAL_WEIGHT
+
     reward += terminal_bonus
     if getattr(self, "log_dqn_details", False):
         self.logger.info(
@@ -592,7 +540,7 @@ def reward_from_events(self, events: List[str]) -> float:
     }
     shaping_rewards = {
 
-        e.REVERSED_DIRECTION: -0.05,
+        e.REVERSED_DIRECTION: -0.06,
 
         e.MOVED_CLOSE_TO_ENEMY: 0.00,
         e.MOVED_AWAY_FROM_ENEMY: 0.00,
@@ -600,13 +548,13 @@ def reward_from_events(self, events: List[str]) -> float:
         e.IN_DANGER: -0.10,
         e.SAFE_WAIT: 0.00,
 
-        e.WAITED: -0.05,
+        e.WAITED: -0.06,
         e.INVALID_ACTION: 0.0,
-        e.BOMB_DROPPED: 0.0,
+        e.BOMB_DROPPED: -0.5,
         e.BOMB_EXPLODED: 0.0,
         e.SURVIVED_ROUND: 0.0,
     }
-
+    TIME_PENALTY = 0.01  # small penalty to encourage faster completion
     major_sum = 0.0
     shaping_sum = 0.0
     for event in events:

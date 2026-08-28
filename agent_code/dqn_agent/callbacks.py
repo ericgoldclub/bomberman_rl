@@ -94,9 +94,9 @@ def setup(self):
     self.grid_size = (s.COLS, s.ROWS)
     self.log_dqn_details = VERBOSE_TRAIN_LOGS
 
-    from .train import DQN
+    from .train import DQN_net
 
-    self.policy_net = DQN(
+    self.policy_net = DQN_net(
         in_channels=self.grid_channels,
         grid_size=self.grid_size,
         scalar_size=self.scalar_size,
@@ -132,61 +132,6 @@ def setup(self):
     self.policy_net.eval()
 
 
-'''
-    # Infer feature sizes from the feature extractor so network inputs stay aligned.
-
-    self.grid_channels, self.scalar_size = _feature_dimensions()
-
-    self.logger.info("Feature dimensions: grid_channels=%d, scalar_size=%d", self.grid_channels, self.scalar_size)
-    self.log_dqn_details = VERBOSE_TRAIN_LOGS
-    self.grid_size = (s.COLS, s.ROWS)
-
-    # Do not instantiate the full model here; create it lazily in act() or in setup_training.
-    # Provide a fallback tabular model if torch isn't available.
-    if self.device is None:
-        self.logger.warning("Torch not available; falling back to table policy")
-        self.model = {}
-        return
-
-    # Build policy network for both train and eval mode and load persisted weights if available.
-    try:
-        import torch
-        from .train import DQN
-
-        self.policy_net = DQN(
-            in_channels=self.grid_channels,
-            grid_size=self.grid_size,
-            scalar_size=self.scalar_size,
-            n_actions=len(ACTIONS),
-        ).to(self.device)
-
-        if self.train:
-            load_path = TRAINING_MODEL_FILE
-        elif os.path.isfile(BEST_MODEL_FILE):
-            load_path = BEST_MODEL_FILE
-        else:
-            load_path = MODEL_FILE
-        self.logger.info(
-            "Model selection mode=%s path=%s exists=%s",
-            "train" if self.train else "eval",
-            load_path,
-            os.path.isfile(load_path),
-        )
-        if os.path.isfile(load_path):
-            self.policy_net.load_state_dict(torch.load(load_path, map_location=self.device))
-            self.logger.info("Loaded DQN model from %s", load_path)
-        else:
-            if self.train:
-                self.logger.warning("No training checkpoint at %s; using freshly initialized policy network.", TRAINING_MODEL_FILE)
-            else:
-                self.logger.warning("No saved DQN model found; using freshly initialized policy network.")
-
-        self.policy_net.eval()
-    except Exception as exc:
-        self.logger.warning("Failed to initialize/load DQN model in setup: %s", exc)
-'''
-
-
 
 def _is_valid_action(game_state: dict, action: str) -> bool:
     if game_state is None:
@@ -213,14 +158,106 @@ def _is_valid_action(game_state: dict, action: str) -> bool:
     return False
 
 
+def _blast_positions(field, x, y, power):
+    """Return all cells affected by a bomb placed at (x, y)."""
+    blast = {(x, y)}
+    for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+        for step in range(1, power + 1):
+            nx, ny = x + dx * step, y + dy * step
+            if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
+                break
+            if field[nx, ny] == -1:
+                break
+            blast.add((nx, ny))
+    return blast
+
+
+def _bomb_is_unsafe(game_state: dict) -> bool:
+    """Reject bomb actions unless they can hit a crate or an enemy."""
+    if game_state is None:
+        return True
+
+    field = game_state["field"]
+    _, _, _, (x, y) = game_state["self"]
+    explosion_map = game_state.get('explosion_map', np.zeros_like(field))
+    if explosion_map[x, y] > 0:
+        return True
+
+    blast = _blast_positions(field, x, y, s.BOMB_POWER)
+    crates_in_range = any(field[cx, cy] == 1 for cx, cy in blast)
+    enemies_in_range = any(
+        (ox, oy) == (cx, cy)
+        for (cx, cy) in blast
+        for ox, oy in [o[-1] for o in game_state["others"] if o[-1] is not None]
+    )
+    return not crates_in_range and not enemies_in_range
+
+
 def _policy_action_mask(game_state: dict) -> np.ndarray:
     """Return the action mask used by the DQN policy."""
     mask = np.array([_is_valid_action(game_state, action) for action in ACTIONS], dtype=bool)
+    if game_state is not None and mask[ACTIONS.index('BOMB')] and _bomb_is_unsafe(game_state):
+        mask[ACTIONS.index('BOMB')] = False
     return mask
 
 def _feature_dimensions() -> tuple:
     """Return (grid_channels, scalar_size) from the fixed constants."""
     return GRID_CHANNELS, SCALAR_FEATURES
+
+
+def _distance_map_on_free_space(
+    free_space: np.ndarray,
+    start: tuple[int, int],
+) -> np.ndarray:
+    """Compute shortest-path distances on walkable tiles with one BFS pass."""
+    X, Y = free_space.shape
+    distance_map = np.full((X, Y), fill_value=np.inf, dtype=np.float32)
+    sx, sy = start
+    distance_map[sx, sy] = 0.0
+
+    queue = deque([start])
+    while queue:
+        cx, cy = queue.popleft()
+        current_distance = distance_map[cx, cy]
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx = cx + dx
+            ny = cy + dy
+            if not (0 <= nx < X and 0 <= ny < Y):
+                continue
+            if not free_space[nx, ny]:
+                continue
+            if np.isfinite(distance_map[nx, ny]):
+                continue
+            distance_map[nx, ny] = current_distance + 1.0
+            queue.append((nx, ny))
+    return distance_map
+
+
+def _nearest_distance_via_look_for_targets(
+    distance_map: np.ndarray,
+    free_space: np.ndarray,
+    start: tuple[int, int],
+    targets: list[tuple[int, int]],
+) -> int | None:
+    """Use look_for_targets to validate target pursuit, then read nearest BFS distance."""
+    if not targets:
+        return None
+    target_set = set(targets)
+    if start in target_set:
+        return 0
+
+    next_step = look_for_targets(free_space, start, targets)
+    if next_step is None or next_step == start:
+        return None
+
+    remaining = []
+    for tx, ty in targets:
+        dist = distance_map[tx, ty]
+        if np.isfinite(dist):
+            remaining.append(float(dist))
+    if not remaining:
+        return None
+    return int(min(remaining))
 
 
 
@@ -345,45 +382,27 @@ def state_to_features(game_state: dict) -> np.array:
 
     enemies_remaining = float(len(others)) / max(1.0, float(s.MAX_AGENTS - 1))
 
-    distance_map = np.full((X, Y), fill_value=np.inf, dtype=np.float32)
-    distance_map[x, y] = 0.0
-
-    queue = deque([(x, y)])
-
-    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-
-    while queue:
-        cx, cy = queue.popleft()
-        current_distance = distance_map[cx, cy]
-
-        for dx, dy in directions:
-            nx = cx + dx
-            ny = cy + dy
-
-            if not (0 <= nx < X and 0 <= ny < Y):
-                continue
-
-            if np.isfinite(distance_map[nx, ny]): # already visited
-                continue
-
-            if field[nx, ny] == -1 or field[nx, ny] == 1: # wall or crate
-                continue
-
-            distance_map[nx, ny] = current_distance + 1.0
-            queue.append((nx, ny))
+    free_space = field == 0
+    distance_map = _distance_map_on_free_space(free_space, (x, y))
 
     coin_distances = []
-
+    valid_coins = []
     for cx, cy in coins:
-        if not (0 <= cx < X and 0 <= cy < Y):
-            continue
-
-        distance = distance_map[cx, cy]
-        if np.isfinite(distance):
-            coin_distances.append(distance)
+        if 0 <= cx < X and 0 <= cy < Y:
+            valid_coins.append((cx, cy))
+            distance = distance_map[cx, cy]
+            if np.isfinite(distance):
+                coin_distances.append(float(distance))
 
     if coin_distances:
-        nearest_coin_distance = min(coin_distances)
+        nearest_coin_distance = _nearest_distance_via_look_for_targets(
+            distance_map,
+            free_space,
+            (x, y),
+            valid_coins,
+        )
+        if nearest_coin_distance is None:
+            nearest_coin_distance = float(min(coin_distances))
         mean_coin_distance = np.mean(coin_distances)
         farthest_coin_distance = max(coin_distances)
         reachable_coins_count = len(coin_distances)
@@ -439,25 +458,26 @@ def act(self, game_state: dict) -> str:
         grid_t = torch.from_numpy(grid).unsqueeze(0).to(self.device)  # shape (1, C, H, W)
         scalar_t = torch.from_numpy(scalar).unsqueeze(0).to(self.device)  # shape (1, S)
 
-        if self.train:
-            epsilon = self.get_epsilon()
-            if random.random() < epsilon:
-                valid_actions = [a for a, allowed in zip(ACTIONS, _policy_action_mask(game_state)) if allowed]
-                if not valid_actions:
-                    chosen_action = 'WAIT'
-                else:
-                    candidates = valid_actions
-                    if np.max(explosion_map) == 0 and coins_remaining > 0:
-                        non_wait_candidates = [a for a in candidates if a != 'WAIT']
-                        if non_wait_candidates:
-                            candidates = non_wait_candidates
-                    chosen_action = random.choice(candidates)
-                if getattr(self, "log_dqn_details", False):
-                    self.logger.info(
-                        f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
-                        f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
-                    )
-                return chosen_action
+        epsilon = self.get_epsilon() if self.train and hasattr(self, "get_epsilon") else 0.0
+
+        if self.train and random.random() < epsilon:
+            valid_actions = [a for a, allowed in zip(ACTIONS, _policy_action_mask(game_state)) if allowed]
+            if not valid_actions:
+                chosen_action = 'WAIT'
+            else:
+                candidates = valid_actions
+                if np.max(explosion_map) == 0 and coins_remaining > 0:
+                    non_wait_candidates = [a for a in candidates if a != 'WAIT']
+                    if non_wait_candidates:
+                        candidates = non_wait_candidates
+                chosen_action = random.choice(candidates)
+            if getattr(self, "log_dqn_details", False):
+                self.logger.info(
+                    f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
+                    f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
+                )
+            return chosen_action
+
         with torch.no_grad():
             q = self.policy_net(grid_t, scalar_t)  # shape (1, n_actions)
             action_mask = _policy_action_mask(game_state)
@@ -466,13 +486,13 @@ def act(self, game_state: dict) -> str:
                     q[0, i] = float('-inf')
             action_idx = int(q.argmax(dim=1).item())
             chosen_action = ACTIONS[action_idx]
-            epsilon_value = self.get_epsilon() if hasattr(self, "get_epsilon") else 0.0
-            if getattr(self, "log_dqn_details", False):
-                self.logger.info(
-                    f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
-                    f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon_value:.3f}"
-                )
-            return chosen_action
+
+        if getattr(self, "log_dqn_details", False):
+            self.logger.info(
+                f"Step {game_state.get('step', '?')}: danger_level={danger_level:.3f}, "
+                f"danger_cells={danger_cells}, coins_remaining={coins_remaining}, action={chosen_action}, epsilon={epsilon:.3f}"
+            )
+        return chosen_action
     except Exception as exc:
         self.logger.warning("DQN act failed, falling back to table or random policy : %s", exc)
         candidates = [a for a, allowed in zip(ACTIONS, _policy_action_mask(game_state)) if allowed]
