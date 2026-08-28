@@ -13,7 +13,7 @@ MODEL_FILE = os.path.join(os.path.dirname(__file__), "kill_agent_saved_model.pt"
 MOVEMENT_DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 DIRECTIONS = [*MOVEMENT_DIRECTIONS, (0, 0)]  # UP, RIGHT, DOWN, LEFT, WAIT
 
-BOARD_CHANNELS = 10
+BOARD_CHANNELS = 14
 VECTOR_DIM = 20
 BOARD_SIZE = 17
 
@@ -27,21 +27,22 @@ def valid_action_mask(game_state):
     _, _, bombs_left, (x, y) = game_state["self"]
 
     danger = bomb_danger_tiles(field, bombs)
+    bomb_pos = set(pos for pos, _ in bombs)
+    enemies = [pos for _, _, _, pos in game_state["others"] if pos is not None]
     explosion_times = bomb_explosion_times(field, bombs)
 
     mask = np.ones(len(ACTIONS), dtype=bool)
 
     for i, action in enumerate(ACTIONS):
         if action == 'BOMB':
-            enemies = [pos for _, _, _, pos in game_state["others"] if pos is not None]
-
+            
             useful_against_enemy = can_hit_enemy_with_bomb(field, x, y, enemies)
             useful_against_crate = can_hit_crate_with_bomb(field, x, y)
             escape_possible = has_escape_after_bomb(field, bombs, explosion_map, (x, y))
 
-            close_to_enemy = any(abs(ex - x) + abs(ey - y) <= BOMB_POWER for ex, ey in enemies)
+            
 
-            mask[i] = bombs_left > 0 and (useful_against_enemy or useful_against_crate or close_to_enemy) and escape_possible
+            mask[i] = bombs_left > 0 and escape_possible and (useful_against_enemy or useful_against_crate)
             continue
             
 
@@ -62,7 +63,8 @@ def valid_action_mask(game_state):
             mask[i] = False
             continue
 
-        is_free = field[nx, ny] == 0
+        next_pos = (nx, ny)
+        is_free = field[nx, ny] == 0 and next_pos not in bomb_pos and next_pos not in enemies
         is_safe = (nx, ny) not in danger and explosion_map[nx, ny] == 0
 
         mask[i] = is_free and is_safe
@@ -83,7 +85,8 @@ def valid_action_mask(game_state):
             }[action]
 
             nx, ny = x + dx, y + dy
-            mask[i] = 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and field[nx, ny] == 0
+            next_pos = (nx, ny)
+            mask[i] = (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and field[nx, ny] == 0 and next_pos not in bomb_pos and next_pos not in enemies)
 
     if not mask.any():
         mask[ACTIONS.index('WAIT')] = True
@@ -134,6 +137,8 @@ def board_to_channels(game_state):
     coins = game_state["coins"]
     bombs = game_state["bombs"]
     explosion_map = game_state["explosion_map"]
+    explosion_times = bomb_explosion_times(field, bombs)
+    enemies = [pos for _, _, _, pos in game_state["others"] if pos is not None]
     _, _, _, (x, y) = game_state["self"]
     board = np.zeros((BOARD_CHANNELS, field.shape[0], field.shape[1]), dtype=np.float32)
     
@@ -142,7 +147,10 @@ def board_to_channels(game_state):
         if (ex, ey) is not None:
             board[9, ex, ey] = 1.0  # other agents
 
-    
+    for (tx, ty), timer in explosion_times.items():
+        board[10, tx, ty] = 1.0 - (timer / BOMB_TIMER)  # normalized explosion times
+
+        
     board[0] = field == -1  # walls
     board[1] = field == 1   # crates
     board[8] = field == 0   # free space
@@ -164,6 +172,36 @@ def board_to_channels(game_state):
         board[6, dx, dy] = 1.0  # danger tiles
 
     board[7] = explosion_map > 0  # explosion map
+
+    for dx, dy in MOVEMENT_DIRECTIONS:
+        nx, ny = x + dx, y + dy
+        if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]:
+            if field[nx, ny] == 0 and (nx, ny) not in bomb_danger_tiles(field, bombs) and explosion_map[nx, ny] == 0:
+                board[11, nx, ny] = 1.0  # safe neighbors
+
+    for tx, ty in explosion_tiles_from_bomb(field, (x, y)):
+        board[12, tx, ty] = 1.0  # tiles that would be affected by a bomb at self position
+
+    for ex, ey in enemies:
+        if (ex, ey) is not None:
+            for tx, ty in explosion_tiles_from_bomb(field, (ex, ey)):
+                board[13, tx, ty] = 1.0  # tiles that would be affected by a bomb at enemy position
+
+
+    #0 walls
+    #1 crates
+    #2 coins
+    #3 self position
+    #4 useful bomb positions
+    #5 bomb timers
+    #6 danger tiles
+    #7 active explosion map
+    #8 free space
+    #9 enemy positions
+    #10 normalized explosion times
+    #11 immediately safe neighbors
+    #12 tiles that would be affected by a bomb at self position
+    #13 tiles that would be affected by a bomb at enemy position
 
     return board
 
@@ -209,7 +247,7 @@ def setup(self):
     """Setup called once when loading the agent."""
     # hyperparams for acting
     self.epsilon = 1.0
-    self.decay_const = 500000
+    self.decay_const = 150000
     self.position_history = deque(maxlen=4)
     # Load model if available
     try:
@@ -286,7 +324,7 @@ def has_escape_after_bomb(field, bombs, explosion_map, start, max_depth = BOMB_T
     bomb_pos = set(pos for pos, _ in simulated_bombs)
 
     frontier = deque([(start, 0)])
-    visited = {start}
+    visited = {(start, 0)}
 
     while frontier:
         (x,y), depth = frontier.popleft()
@@ -295,15 +333,14 @@ def has_escape_after_bomb(field, bombs, explosion_map, start, max_depth = BOMB_T
         currently_exploding = explosion_map[x, y] > 0
         explodes_now = explosion_time is not None and explosion_time <= depth
 
-        if depth > 0 and not currently_exploding and not explodes_now:
-            future_safe = explosion_time is None or explosion_time > depth + 1
-            if future_safe:
-                return True
+
+        if depth >= BOMB_TIMER +1 and explosion_map[x,y] == 0 and explosion_time > depth:
+            return True
 
         if depth >= max_depth:
             continue    
 
-        for dx, dy in MOVEMENT_DIRECTIONS:
+        for dx, dy in DIRECTIONS:
             nx, ny = x + dx, y + dy
             next_pos = (nx, ny)
             next_depth = depth + 1
@@ -312,16 +349,22 @@ def has_escape_after_bomb(field, bombs, explosion_map, start, max_depth = BOMB_T
                 continue
             if field[nx, ny] != 0:
                 continue
-            if (nx, ny) in visited:
+            if next_pos in bomb_pos and next_pos != start:
+                continue
+            if explosion_map[nx, ny] > 0:
                 continue
 
             next_explosion_time = explosion_times.get(next_pos, float('inf'))
-            if explosion_map[nx, ny] > 0 or next_explosion_time <= next_depth:
+            
+            if next_explosion_time is not None and next_explosion_time <= next_depth:
                 continue
-            if next_ex
 
-            visited.add((nx, ny))
-            frontier.append(((nx, ny), depth + 1))
+            state = (next_pos, next_depth)
+            if state in visited:
+                continue
+
+            visited.add(state)
+            frontier.append((next_pos, next_depth))
 
     return False
 
@@ -447,7 +490,7 @@ def act(self, game_state: dict) -> str:
         epsilon = 0.05 + (1-0.05)*np.exp(-self.steps_done/self.decay_const)
 
     logging.getLogger('BombeRLeWorld').info(
-        f'Agent <dqn_coin_burst_agent> current epsilon {epsilon:.4f}'
+        f'Agent <kill_agent> current epsilon {epsilon:.4f}'
     )
 
     # If we fell back to table model

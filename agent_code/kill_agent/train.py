@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .callbacks import (ACTIONS, state_to_features, MODEL_FILE, BOARD_CHANNELS, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb)
+from .callbacks import (ACTIONS, can_hit_crate_with_bomb, state_to_features, MODEL_FILE, BOARD_CHANNELS, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb)
 
 import events as e
 
@@ -144,9 +144,17 @@ def optimize_model(self):
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """Called once per step to allow intermediate rewards based on game events and to store transitions."""
-    old_state = state_to_features(old_game_state)
-    new_state = state_to_features(new_game_state)
+    if not hasattr(self, 'position_history'):
+        self.position_history = deque(maxlen=4)
 
+    old_state = state_to_features(old_game_state, position_history=self.position_history) if old_game_state is not None else None
+
+    if new_game_state is not None:
+        new_pos = new_game_state['self'][3]
+        if len(self.position_history) == 0 or self.position_history[-1] != new_pos:
+            self.position_history.append(new_pos)
+
+    new_state = state_to_features(new_game_state, position_history=self.position_history) if new_game_state is not None else None
     #did we move closer to a coin or further away from it?
     if old_state is not None and new_state is not None:
         coins = new_game_state['coins']
@@ -187,9 +195,14 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         bombs = new_game_state["bombs"]
         explosion_map = old_game_state["explosion_map"]
 
-        if (can_hit_enemy_with_bomb(field, old_pos[0], old_pos[1], enemies) and has_escape_after_bomb(field, bombs, explosion_map, old_pos)):
-            events.append(e.USEFUL_BOMB_DROPPED
-                        )
+        hits_enemy = can_hit_enemy_with_bomb(field, old_pos[0], old_pos[1], enemies)
+        hits_crate = can_hit_crate_with_bomb(field, old_pos[0], old_pos[1])
+        escape_possible = has_escape_after_bomb(field, bombs, explosion_map, old_pos)
+
+        if escape_possible and hits_enemy:
+            events.append(e.USEFUL_BOMB_DROPPED)
+        elif escape_possible and hits_crate and not hits_enemy:
+            events.append(e.USEFUL_BOMB_DROPPED)
         else:
             events.append(e.USELESS_BOMB_DROPPED)
 
@@ -197,23 +210,20 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     #check for oscillation A -> B -> A -> B
     if old_state is not None and new_state is not None:
-        old_pos = old_game_state['self'][3]
         new_pos = new_game_state['self'][3]
 
-        if not hasattr(self, 'position_history'):
-            self.position_history = deque(maxlen=4)
+       
 
-        self.position_history.append(new_pos)
-
-        if len(self.position_history) >= 3:
-            # Check if the last four positions form an oscillation pattern
-            if (self.position_history[-1] == self.position_history[-3]):                events.append(e.OSCILLATION)
-
-        if len(self.position_history) >= 4:
-            # Check if the last four positions form an oscillation pattern
-            if (self.position_history[-1] == self.position_history[-3] and
-                self.position_history[-2] == self.position_history[-4]):
+        if len(self.position_history) >= 3: 
+            if self.position_history[-1] == self.position_history[-3]:
                 events.append(e.OSCILLATION)
+
+        if len(self.position_history) >= 4: 
+            if self.position_history[-1] == self.position_history[-3] and self.position_history[-2] == self.position_history[-4]:
+                events.append(e.OSCILLATION)
+
+    new_state = state_to_features(new_game_state, position_history=self.position_history) if new_game_state is not None else None
+
 
     #check for enemy proximity
     if old_state is not None and new_state is not None:
@@ -260,7 +270,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
-    last_state = state_to_features(last_game_state)
+    last_state = state_to_features(last_game_state, position_history=self.position_history)
     reward = reward_from_events(self, events)
     # terminal state: next_state is None
     if last_state is not None:
@@ -279,23 +289,23 @@ def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
         e.COIN_COLLECTED: 5,
         #e.BOMB_DROPPED: 10,
-        e.KILLED_OPPONENT: 200,
-        e.MOVED_CLOSE_TO_ENEMY: 20,
-        e.MOVED_AWAY_FROM_ENEMY: -20,
+        e.KILLED_OPPONENT: 250,
+        e.MOVED_CLOSE_TO_ENEMY: 3,
+        e.MOVED_AWAY_FROM_ENEMY: -1,
         #e.COIN_FOUND: 10,
         #e.CRATE_DESTROYED: 1,
-        e.USEFUL_BOMB_DROPPED: 10,
-        e.USELESS_BOMB_DROPPED: -25,
-        e.MOVED_CLOSE_TO_COIN: 2,
-        e.MOVED_AWAY_FROM_COIN: -2,
+        e.USEFUL_BOMB_DROPPED: 25,
+        e.USELESS_BOMB_DROPPED: -60,
+        e.MOVED_CLOSE_TO_COIN: 1,
+        e.MOVED_AWAY_FROM_COIN: -1,
         #e.MOVED_TOWARDS_CRATE: 0,
         #e.MOVED_AWAY_FROM_CRATE: 0 ,
-        e.INVALID_ACTION: -15,
-        e.KILLED_SELF: -150,
-        e.GOT_KILLED: -100,
-        e.WAITED: -10,
-        e.OSCILLATION: -20,
-        e.STEP_PENALTY: -0.1,  # Small penalty for each step to encourage faster completion
+        e.INVALID_ACTION: -20,
+        e.KILLED_SELF: -250,
+        e.GOT_KILLED: -120,
+        e.WAITED: -4,
+        e.OSCILLATION: -25,
+        e.STEP_PENALTY: -0.2,  # Small penalty for each step to encourage faster completion
         }
     reward_sum = 0
     for event in events:
