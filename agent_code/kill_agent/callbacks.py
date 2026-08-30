@@ -14,7 +14,7 @@ MOVEMENT_DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 DIRECTIONS = [*MOVEMENT_DIRECTIONS, (0, 0)]  # UP, RIGHT, DOWN, LEFT, WAIT
 
 BOARD_CHANNELS = 14
-VECTOR_DIM = 20
+VECTOR_DIM = 21
 BOARD_SIZE = 17
 
 BOMB_POWER = 3
@@ -247,7 +247,7 @@ def setup(self):
     """Setup called once when loading the agent."""
     # hyperparams for acting
     self.epsilon = 1.0
-    self.decay_const = 150000
+    self.decay_const = 569840
     self.position_history = deque(maxlen=4)
     # Load model if available
     try:
@@ -376,7 +376,7 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
     coins = game_state["coins"]
     bombs = game_state["bombs"]
     explosion_map = game_state["explosion_map"]
-    _, _, bombs_left, (x, y) = game_state["self"]
+    _, score, bombs_left, (x, y) = game_state["self"]
     enemies = [pos for _, _, _, pos in game_state["others"] if pos is not None]
 
     
@@ -458,8 +458,8 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
         good_kill_opportunity,
         enemy_dx / BOARD_SIZE,
         enemy_dy / BOARD_SIZE,
-        len(enemies)/3
-        #int(can_hit_enemy_with_bomb(field, x, y, [pos for _, _, _, pos in game_state["others"]]))
+        len(enemies)/3,
+        score
     ], dtype=np.float32)
 
     board = board_to_channels(game_state)

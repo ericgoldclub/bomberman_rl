@@ -16,7 +16,7 @@ import events as e
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward', 'next_action_mask'))  # Added next_action to the Transition namedtuple
 
 # Hyperparameters
-BUFFER_SIZE = 100000
+BUFFER_SIZE = 40000
 BATCH_SIZE = 16
 GAMMA = 0.97
 LR = 1e-3
@@ -194,6 +194,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         field = new_game_state["field"]
         bombs = new_game_state["bombs"]
         explosion_map = old_game_state["explosion_map"]
+        
+        
 
         hits_enemy = can_hit_enemy_with_bomb(field, old_pos[0], old_pos[1], enemies)
         hits_crate = can_hit_crate_with_bomb(field, old_pos[0], old_pos[1])
@@ -250,10 +252,15 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             elif new_enemy_distance > old_enemy_distance:
                 events.append(e.MOVED_AWAY_FROM_ENEMY)
 
+    
+    old_score = old_game_state["self"][1] if old_game_state is not None else 0
+    new_score = new_game_state["self"][1] if new_game_state is not None else old_score
+    delta_score = new_score - old_score
     # Update counters and train only every n environment steps.
     self.steps_done += 1
     events.append(e.STEP_PENALTY)  # Add a small penalty for each step to encourage faster completion
     reward = reward_from_events(self, events)
+    reward += 5 * delta_score
 
     # Store transition
     if old_state is not None:
@@ -280,6 +287,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     for _ in range(10):
         optimize_model(self)
 
+    
+    
     # Save the policy network
     os.makedirs(os.path.dirname(MODEL_FILE), exist_ok=True)
     torch.save({"model_state_dict": self.policy_net.state_dict(), "steps_done": self.steps_done}, MODEL_FILE)
@@ -287,12 +296,12 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
 def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
-        e.COIN_COLLECTED: 5,
+        e.COIN_COLLECTED: 50,
         #e.BOMB_DROPPED: 10,
         e.KILLED_OPPONENT: 250,
         e.MOVED_CLOSE_TO_ENEMY: 3,
-        e.MOVED_AWAY_FROM_ENEMY: -1,
-        #e.COIN_FOUND: 10,
+        e.MOVED_AWAY_FROM_ENEMY: -3,
+        e.COIN_FOUND: 5,
         #e.CRATE_DESTROYED: 1,
         e.USEFUL_BOMB_DROPPED: 25,
         e.USELESS_BOMB_DROPPED: -60,
