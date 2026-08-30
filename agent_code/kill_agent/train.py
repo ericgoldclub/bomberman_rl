@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .callbacks import (ACTIONS, can_hit_crate_with_bomb, state_to_features, MODEL_FILE, BOARD_CHANNELS, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb)
+from .callbacks import (ACTIONS, can_hit_crate_with_bomb, state_to_features, MODEL_FILE, BOARD_CHANNELS, BOARD_SIZE, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb)
 
 import events as e
 
@@ -30,14 +30,14 @@ class HybridDQN(nn.Module):
         super().__init__()
 
         self.cnn = nn.Sequential(
-            nn.Conv2d(board_channels, 16, kernel_size=3, padding=1, stride=2),
+            nn.Conv2d(board_channels, 16, kernel_size=3, padding=1, stride=1),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Flatten()
         )
 
-        cnn_out = 32 * 9 * 9  # Assuming BOARD_SIZE is defined elsewhere
+        cnn_out = 32 * BOARD_SIZE**2 # Assuming BOARD_SIZE is defined elsewhere
 
         self.mlp = nn.Sequential(
             nn.Linear(vector_dim, 256),
