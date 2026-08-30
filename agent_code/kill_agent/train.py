@@ -202,9 +202,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         escape_possible = has_escape_after_bomb(field, bombs, explosion_map, old_pos)
 
         if escape_possible and hits_enemy:
-            events.append(e.USEFUL_BOMB_DROPPED)
+            events.append(e.KILL_BOMB_DROPPED)
         elif escape_possible and hits_crate and not hits_enemy:
-            events.append(e.USEFUL_BOMB_DROPPED)
+            events.append(e.CRATE_BOMB_DROPPED)
         else:
             events.append(e.USELESS_BOMB_DROPPED)
 
@@ -212,10 +212,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     #check for oscillation A -> B -> A -> B
     if old_state is not None and new_state is not None:
-        new_pos = new_game_state['self'][3]
-
-       
-
         if len(self.position_history) >= 3: 
             if self.position_history[-1] == self.position_history[-3]:
                 events.append(e.OSCILLATION)
@@ -296,17 +292,18 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
 def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
-        e.COIN_COLLECTED: 50,
+        e.COIN_COLLECTED: 1,
         #e.BOMB_DROPPED: 10,
-        e.KILLED_OPPONENT: 250,
+        e.KILLED_OPPONENT: 300,
         e.MOVED_CLOSE_TO_ENEMY: 3,
         e.MOVED_AWAY_FROM_ENEMY: -3,
         e.COIN_FOUND: 5,
         #e.CRATE_DESTROYED: 1,
-        e.USEFUL_BOMB_DROPPED: 25,
+        e.KILL_BOMB_DROPPED: 80,
+        e.CRATE_BOMB_DROPPED: 2,
         e.USELESS_BOMB_DROPPED: -60,
-        e.MOVED_CLOSE_TO_COIN: 1,
-        e.MOVED_AWAY_FROM_COIN: -1,
+        e.MOVED_CLOSE_TO_COIN: 0,
+        e.MOVED_AWAY_FROM_COIN: 0,
         #e.MOVED_TOWARDS_CRATE: 0,
         #e.MOVED_AWAY_FROM_CRATE: 0 ,
         e.INVALID_ACTION: -20,

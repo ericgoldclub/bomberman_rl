@@ -14,7 +14,7 @@ MOVEMENT_DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 DIRECTIONS = [*MOVEMENT_DIRECTIONS, (0, 0)]  # UP, RIGHT, DOWN, LEFT, WAIT
 
 BOARD_CHANNELS = 14
-VECTOR_DIM = 21
+VECTOR_DIM = 22
 BOARD_SIZE = 17
 
 BOMB_POWER = 3
@@ -26,7 +26,7 @@ def valid_action_mask(game_state):
     explosion_map = game_state["explosion_map"]
     _, _, bombs_left, (x, y) = game_state["self"]
 
-    danger = bomb_danger_tiles(field, bombs)
+
     bomb_pos = set(pos for pos, _ in bombs)
     enemies = [pos for _, _, _, pos in game_state["others"] if pos is not None]
     explosion_times = bomb_explosion_times(field, bombs)
@@ -35,19 +35,20 @@ def valid_action_mask(game_state):
 
     for i, action in enumerate(ACTIONS):
         if action == 'BOMB':
-            
+            explosion_time = explosion_times.get((x, y), float('inf'))
             useful_against_enemy = can_hit_enemy_with_bomb(field, x, y, enemies)
             useful_against_crate = can_hit_crate_with_bomb(field, x, y)
             escape_possible = has_escape_after_bomb(field, bombs, explosion_map, (x, y))
 
             
 
-            mask[i] = bombs_left > 0 and escape_possible and (useful_against_enemy or useful_against_crate)
+            mask[i] = bombs_left > 0 and escape_possible and (useful_against_enemy or (useful_against_crate and len(enemies) == 0))
             continue
             
 
         if action == 'WAIT':
-            mask[i] = not ((x, y) in danger or explosion_map[x, y] > 0)
+            explosion_time = explosion_times.get((x, y), float('inf'))
+            mask[i] = explosion_map[x, y] == 0 and explosion_time > 1
             continue
 
         dx, dy = {
@@ -65,7 +66,8 @@ def valid_action_mask(game_state):
 
         next_pos = (nx, ny)
         is_free = field[nx, ny] == 0 and next_pos not in bomb_pos and next_pos not in enemies
-        is_safe = (nx, ny) not in danger and explosion_map[nx, ny] == 0
+        explosion_time = explosion_times.get(next_pos, float('inf'))
+        is_safe = explosion_map[nx, ny] == 0 and explosion_time > 1
 
         mask[i] = is_free and is_safe
 
@@ -176,7 +178,8 @@ def board_to_channels(game_state):
     for dx, dy in MOVEMENT_DIRECTIONS:
         nx, ny = x + dx, y + dy
         if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]:
-            if field[nx, ny] == 0 and (nx, ny) not in bomb_danger_tiles(field, bombs) and explosion_map[nx, ny] == 0:
+            explosion_time = explosion_times.get((nx, ny), float('inf'))
+            if field[nx, ny] == 0 and explosion_map[nx, ny] == 0 and explosion_time > 1:
                 board[11, nx, ny] = 1.0  # safe neighbors
 
     for tx, ty in explosion_tiles_from_bomb(field, (x, y)):
@@ -308,6 +311,48 @@ def can_hit_enemy_with_bomb(field, x, y, enemies, bomb_power=BOMB_POWER):
 
     return False
 
+def enemy_has_escape_after_bomb(field, bombs, explosion_map, enemy_pos, bomb_pos, max_depth = BOMB_TIMER + 2):
+    enemy_pos = tuple(enemy_pos)
+    bomb_pos = tuple(bomb_pos)
+
+    simulated_bombs = list(bombs) + [(bomb_pos, BOMB_TIMER)]
+    explosion_times = bomb_explosion_times(field, simulated_bombs)
+    blocked_bomb_pos = set(pos for pos, _ in simulated_bombs)
+
+    frontier = deque([(enemy_pos, 0)])
+    visited = {(enemy_pos, 0)}
+
+    while frontier:
+        (x,y), depth = frontier.popleft()
+
+        if depth >= BOMB_TIMER and explosion_times.get((x, y), float('inf')) > depth:
+            return True
+        if depth >= max_depth:
+            continue
+
+        for dx, dy in DIRECTIONS:
+            nx, ny = x + dx, y + dy
+            next_pos = (nx, ny)
+            next_depth = depth + 1
+
+            if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
+                continue
+            if field[nx, ny] != 0:
+                continue
+            if next_pos in blocked_bomb_pos:
+                continue
+            if explosion_map[nx, ny] > 0:
+                continue
+            if explosion_times.get(next_pos, float('inf')) <= next_depth:
+                continue
+
+            state = (next_pos, next_depth)
+            if state not in visited:
+                visited.add(state)
+                frontier.append((next_pos, next_depth)) 
+
+    return False
+
 
 def useful_bomb_positions(field):
     return [
@@ -321,7 +366,7 @@ def has_escape_after_bomb(field, bombs, explosion_map, start, max_depth = BOMB_T
     start = tuple(start)
     simulated_bombs = list(bombs) + [(start, BOMB_TIMER)]
     explosion_times = bomb_explosion_times(field, simulated_bombs)
-    bomb_pos = set(pos for pos, _ in simulated_bombs)
+    blocked_bomb_pos = set(pos for pos, _ in simulated_bombs)
 
     frontier = deque([(start, 0)])
     visited = {(start, 0)}
@@ -349,7 +394,7 @@ def has_escape_after_bomb(field, bombs, explosion_map, start, max_depth = BOMB_T
                 continue
             if field[nx, ny] != 0:
                 continue
-            if next_pos in bomb_pos and next_pos != start:
+            if next_pos in blocked_bomb_pos and next_pos != start:
                 continue
             if explosion_map[nx, ny] > 0:
                 continue
@@ -398,11 +443,17 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
     danger = bomb_danger_tiles(field, bombs)
     is_in_danger = int((x, y) in danger or explosion_map[x, y] > 0)
 
+    explosion_times = bomb_explosion_times(field, bombs)
     safe_neighbors = []
     for dx, dy in MOVEMENT_DIRECTIONS:
         nx, ny = x + dx, y + dy
+        explosion_time = explosion_times.get((nx, ny), float('inf'))
         safe_neighbors.append(
-            0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and field[nx, ny] == 0 and (nx, ny) not in danger and explosion_map[nx, ny] == 0)
+            0 <= nx < field.shape[0]
+            and 0 <= ny < field.shape[1]
+            and field[nx, ny] == 0
+            and explosion_map[nx, ny] == 0
+            and explosion_time > 1)
 
     prev_dx, prev_dy = 0, 0
     two_back_dx, two_back_dy = 0, 0
@@ -437,6 +488,11 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
     enemy_in_bomb_range = int(can_hit_enemy_with_bomb(field, x, y, enemies))
     safe_after_bomb = int(has_escape_after_bomb(field, bombs, explosion_map, (x, y)))
     good_kill_opportunity = int(enemy_in_bomb_range and safe_after_bomb)
+    enemy_trapped_by_bomb = int(any(
+        can_hit_enemy_with_bomb(field, x, y, [(ex, ey)])
+        and not enemy_has_escape_after_bomb(field, bombs, explosion_map, (ex, ey), (x, y))
+        for ex, ey in enemies
+    ))
     
     vector = np.array([
         coin_dx / BOARD_SIZE,
@@ -456,6 +512,7 @@ def state_to_features(game_state: dict, position_history=None) -> np.array:
         enemy_in_bomb_range,
         safe_after_bomb,
         good_kill_opportunity,
+        enemy_trapped_by_bomb,
         enemy_dx / BOARD_SIZE,
         enemy_dy / BOARD_SIZE,
         len(enemies)/3,
