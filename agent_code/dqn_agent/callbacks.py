@@ -13,7 +13,7 @@ MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-saved-model.pt")
 BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-model.pt")
 TRAINING_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-coin-collector.pt")
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
-VERBOSE_TRAIN_LOGS = True
+VERBOSE_TRAIN_LOGS = False
 
 GRID_CHANNELS = 10  # number of channels in the grid input to the DQN
 SCALAR_FEATURES = 8 + len(ACTIONS)  # base scalar features + one-hot last action
