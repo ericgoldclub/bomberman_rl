@@ -61,7 +61,7 @@ SHAPING_REWARDS = {
 TERMINAL_OBJECTIVE_ALIGNMENT_WEIGHT = 0.1 # multiplying the current score to shape the reward
 ALL_COINS_CLEAR_BONUS = 5.0 # bonus reward for clearing all coins
 POST_CLEAR_TIME_LEFT_WEIGHT = 1.0 # rewarding the time till end of game after all coins are cleared
-STEP_TIME_COST = 0.1 # penalty for each step to encourage faster completion of objectives
+STEP_TIME_COST = 0.05 # penalty for each step to encourage faster completion of objectives
 
 
 def _pack_feature_array(arr: np.ndarray | None, dtype: np.dtype) -> np.ndarray | None:
@@ -128,6 +128,17 @@ def _load_hyperparameters(self) -> None:
     )
     self.steps_done = int(parsed.get("STEPS_DONE", 0.0))
 
+    if self.buffer_size <= 0:
+        raise RuntimeError("BUFFER_SIZE must be > 0.")
+    if self.batch_size <= 0:
+        raise RuntimeError("BATCH_SIZE must be > 0.")
+    if self.min_replay_size <= 0:
+        raise RuntimeError("MIN_REPLAY_SIZE must be > 0.")
+    if self.batch_size > self.buffer_size:
+        raise RuntimeError(
+            f"BATCH_SIZE ({self.batch_size}) must not exceed BUFFER_SIZE ({self.buffer_size})."
+        )
+
 
 def _save_hyperparameters(self) -> None:
     """Update runtime state fields in Hyperparams.prm without touching fixed parameters."""
@@ -188,6 +199,10 @@ def setup_training(self):
     _load_hyperparameters(self)
 
     self.replay_buffer = deque(maxlen=self.buffer_size)
+    self.replay_start_size = min(
+        self.buffer_size,
+        max(self.min_replay_size, self.batch_size),
+    )
     self.gradient_steps = 0
     self.round_coins_collected = 0
     self.round_number_kills = 0
@@ -226,8 +241,9 @@ def setup_training(self):
 
     
     self.logger.info(
-        "Training initialized: buffer=%d, batch=%d, gamma=%.3f, lr=%g",
+        "Training initialized: buffer=%d, replay_start=%d, batch=%d, gamma=%.3f, lr=%g",
         self.buffer_size,
+        self.replay_start_size,
         self.batch_size,
         self.gamma,
         self.lr,
@@ -238,7 +254,7 @@ def optimize_model(self):
 
     '''Perform double DQN optimization step on a batch of transitions from the replay buffer.'''
 
-    if len(self.replay_buffer) < self.min_replay_size:
+    if len(self.replay_buffer) < self.replay_start_size:
         return None
 
     batch = random.sample(self.replay_buffer, self.batch_size)
