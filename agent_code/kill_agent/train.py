@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .callbacks import (ACTIONS, can_hit_crate_with_bomb, state_to_features, MODEL_FILE, BOARD_CHANNELS, BOARD_SIZE, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb)
+from .callbacks import (ACTIONS, can_hit_crate_with_bomb, state_to_features, MODEL_FILE, BOARD_CHANNELS, BOARD_SIZE, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb, enemy_has_escape_after_bomb)
 
 import events as e
 
@@ -200,9 +200,16 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         hits_enemy = can_hit_enemy_with_bomb(field, old_pos[0], old_pos[1], enemies)
         hits_crate = can_hit_crate_with_bomb(field, old_pos[0], old_pos[1])
         escape_possible = has_escape_after_bomb(field, bombs, explosion_map, old_pos)
+        traps_enemy = any(
+            can_hit_enemy_with_bomb(field, old_pos[0], old_pos[1], [enemy])
+            and not enemy_has_escape_after_bomb(field, bombs, explosion_map, enemy, old_pos)
+            for enemy in enemies
+        )
 
-        if escape_possible and hits_enemy:
+        if escape_possible and traps_enemy:
             events.append(e.KILL_BOMB_DROPPED)
+        elif escape_possible and hits_enemy:
+            events.append(e.ENEMY_PRESSURE_BOMB_DROPPED)
         elif escape_possible and hits_crate and not hits_enemy:
             events.append(e.CRATE_BOMB_DROPPED)
         else:
@@ -295,17 +302,18 @@ def reward_from_events(self, events: List[str]) -> int:
         e.COIN_COLLECTED: 1,
         #e.BOMB_DROPPED: 10,
         e.KILLED_OPPONENT: 300,
-        e.MOVED_CLOSE_TO_ENEMY: 3,
-        e.MOVED_AWAY_FROM_ENEMY: -3,
+        e.MOVED_CLOSE_TO_ENEMY: 2,
+        e.MOVED_AWAY_FROM_ENEMY: -2,
         e.COIN_FOUND: 5,
-        #e.CRATE_DESTROYED: 1,
-        e.KILL_BOMB_DROPPED: 80,
-        e.CRATE_BOMB_DROPPED: 2,
+        e.CRATE_DESTROYED: 20,
+        e.KILL_BOMB_DROPPED: 120,
+        e.ENEMY_PRESSURE_BOMB_DROPPED: 25,
+        e.CRATE_BOMB_DROPPED: 30,
         e.USELESS_BOMB_DROPPED: -60,
         e.MOVED_CLOSE_TO_COIN: 0,
         e.MOVED_AWAY_FROM_COIN: 0,
-        #e.MOVED_TOWARDS_CRATE: 0,
-        #e.MOVED_AWAY_FROM_CRATE: 0 ,
+        e.MOVED_TOWARDS_CRATE: 1.5,
+        e.MOVED_AWAY_FROM_CRATE: -1.5,
         e.INVALID_ACTION: -20,
         e.KILLED_SELF: -250,
         e.GOT_KILLED: -120,

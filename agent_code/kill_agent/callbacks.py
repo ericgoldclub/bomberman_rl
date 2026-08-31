@@ -42,7 +42,7 @@ def valid_action_mask(game_state):
 
             
 
-            mask[i] = bombs_left > 0 and escape_possible and (useful_against_enemy or (useful_against_crate and len(enemies) == 0))
+            mask[i] = bombs_left > 0 and escape_possible and (useful_against_enemy or useful_against_crate)
             continue
             
 
@@ -305,6 +305,8 @@ def can_hit_enemy_with_bomb(field, x, y, enemies, bomb_power=BOMB_POWER):
             if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
                 break
             if field[nx, ny] == -1:
+                break
+            if field[nx, ny] == 1:
                 break
             if (nx, ny) in enemies:
                 return True
