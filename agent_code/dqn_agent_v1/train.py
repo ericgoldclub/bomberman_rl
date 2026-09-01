@@ -82,7 +82,7 @@ SHAPING_REWARDS = {
 
 TERMINAL_OBJECTIVE_ALIGNMENT_WEIGHT = 0.1 # multiplying the current score to shape the reward
 ALL_COINS_CLEAR_BONUS = 5.0 # bonus reward for clearing all coins
-STEP_TIME_COST = 0.005 # penalty for each step to encourage faster completion of objectives
+STEP_TIME_COST = 0.0 # penalty for each step to encourage faster completion of objectives
 
 def _transition_key(game_state: dict | None, action: str):
     """Identify the environment action represented by a replay transition."""

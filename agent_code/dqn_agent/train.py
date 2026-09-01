@@ -56,32 +56,33 @@ CHECKPOINT_VERSION = 1
 REPLAY_BUFFER_VERSION = 1
 REPLAY_SAVE_EVERY_ROUNDS = 100
 
-BEST_MODEL_METRIC_VERSION = 1
+BEST_MODEL_METRIC_VERSION = 2
 FEATURE_VERSION = 1
-REWARD_VERSION = 1
+REWARD_VERSION = 2
 
+SUICIDE_REWARD = -5.0
+SUICIDE_SELECTION_PENALTY = 5.0
 
 from .Networks import DQN_prev as DQN_net
 
 MAJOR_REWARDS = {
     e.COIN_COLLECTED: 1.0,
     e.KILLED_OPPONENT: 5.0,
-    e.KILLED_SELF: -5.0,
     e.GOT_KILLED: -5.0,
-    e.COIN_FOUND: 0.05,
-    e.OPPONENT_ELIMINATED: 0.25,
-    e.CRATE_DESTROYED: 0.15,
+    e.COIN_FOUND: 0.10,
+    e.OPPONENT_ELIMINATED: 0.0,
+    e.CRATE_DESTROYED: 0.35,
 }
 
 SHAPING_REWARDS = {
     e.REVERSED_DIRECTION: -0.015, # small penalty for reversing direction
-    e.IN_DANGER: -0.03,
-    e.WAITED: -0.01, # small penalty for waiting
+    e.IN_DANGER: -0.3,
+    e.WAITED: -0.005, # small penalty for waiting
 }
 
 
 TERMINAL_OBJECTIVE_ALIGNMENT_WEIGHT = 0.1 # multiplying the current score to shape the reward
-ALL_COINS_CLEAR_BONUS = 5.0 # bonus reward for clearing all coins
+ALL_COINS_CLEAR_BONUS = 5.0 #   bonus reward for clearing all coins
 STEP_TIME_COST = 0.005 # penalty for each step to encourage faster completion of objectives
 
 def _transition_key(game_state: dict | None, action: str):
@@ -198,6 +199,12 @@ def _save_hyperparameters(self) -> None:
         "BEST_MODEL_COMPLETION_RATE": (f"{self.best_completion_rate:.5f}"),
         "BEST_MODEL_MEAN_TIME_LEFT": (f"{self.best_mean_time_left:.5f}"),
         "BEST_MODEL_METRIC_VERSION": (str(BEST_MODEL_METRIC_VERSION)),
+        "BEST_MODEL_SELECTION_SCORE": (
+            f"{float(self.best_selection_score):.5f}"
+        ),
+        "BEST_MODEL_SUICIDE_RATE": (
+            f"{float(self.best_suicide_rate):.5f}"
+        ),
     }
 
     lines: list[str] = []
@@ -258,6 +265,13 @@ def _save_latest_checkpoint(self) -> None:
         "grid_channels": int(self.grid_channels),
         "scalar_size": int(self.scalar_size),
         "actions": tuple(ACTIONS),
+
+        "best_selection_score": float(
+            self.best_selection_score
+        ),
+        "best_suicide_rate": float(
+            self.best_suicide_rate
+        ),
         "best_completion_rate": float(
             self.best_completion_rate
         ),
@@ -351,6 +365,19 @@ def _restore_latest_checkpoint(self) -> None:
         stored_metric_version
         == BEST_MODEL_METRIC_VERSION
     ):
+        self.best_selection_score = float(
+            checkpoint.get(
+                "best_selection_score",
+                float("-inf"),
+            )
+        )
+
+        self.best_suicide_rate = float(
+            checkpoint.get(
+                "best_suicide_rate",
+                1.0,
+            )
+        )
         self.best_score = float(
             checkpoint.get("best_score", -1.0)
         )
@@ -393,7 +420,8 @@ def _restore_latest_checkpoint(self) -> None:
             stored_metric_version,
             BEST_MODEL_METRIC_VERSION,
         )
-
+        self.best_selection_score = float("-inf")
+        self.best_suicide_rate = 1.0
         self.best_score = -1.0
         self.best_score_coins_collected = 0
         self.best_score_enemies_killed = 0
@@ -601,6 +629,14 @@ def _complete_evaluation_block(self) -> None:
         dtype=np.float64,
     )
 
+    suicides = np.asarray(
+        [
+            result.get("suicided", False)
+            for result in self._evaluation_results
+        ],
+        dtype=np.float64,
+    )
+
     completed_times = [
         result["time_left"]
         for result in self._evaluation_results
@@ -609,21 +645,32 @@ def _complete_evaluation_block(self) -> None:
 
     mean_game_score = float(np.mean(game_scores))
     completion_rate = float(np.mean(completions))
+    suicide_rate = float(np.mean(suicides))
 
     if completed_times:
-        mean_time_left = float(
-            np.mean(completed_times)
-        )
+        mean_time_left = float(np.mean(completed_times))
     else:
         mean_time_left = 0.0
 
+    # Convert suicide frequency into game-score units.
+    selection_score = (
+        mean_game_score
+        - SUICIDE_SELECTION_PENALTY * suicide_rate
+    )
+
+    # The adjusted score is the primary criterion. Remaining values provide
+    # deterministic tie-breaking.
     candidate_metric = (
+        selection_score,
+        - suicide_rate,
         mean_game_score,
         completion_rate,
         mean_time_left,
     )
 
     best_metric = (
+        float(self.best_selection_score),
+        - float(self.best_suicide_rate),
         float(self.best_score),
         float(self.best_completion_rate),
         float(self.best_mean_time_left),
@@ -631,21 +678,25 @@ def _complete_evaluation_block(self) -> None:
 
     self.logger.info(
         "Greedy evaluation completed: "
-        "mean_game_score=%.3f completion_rate=%.3f "
+        "mean_game_score=%.3f suicide_rate=%.3f "
+        "selection_score=%.3f completion_rate=%.3f "
         "mean_time_left=%.1f over %d rounds.",
         mean_game_score,
+        suicide_rate,
+        selection_score,
         completion_rate,
         mean_time_left,
         len(self._evaluation_results),
     )
 
     if candidate_metric > best_metric:
+        self.best_selection_score = selection_score
         self.best_score = mean_game_score
+        self.best_suicide_rate = suicide_rate
         self.best_completion_rate = completion_rate
         self.best_mean_time_left = mean_time_left
 
-        # These legacy fields remain available for logging and
-        # Hyperparams.prm compatibility.
+        # Legacy fields retained for Hyperparams.prm compatibility.
         self.best_score_coins_collected = int(
             round(mean_game_score)
         )
@@ -695,6 +746,10 @@ def setup_training(self):
     self.best_score_coins_collected = 0
     self.best_score_enemies_killed = 0
     self.best_score_time_left_after_all_coins = 0
+    self.best_selection_score = float("-inf")
+    self.best_suicide_rate = 1.0
+    self.best_completion_rate = 0.0
+    self.best_mean_time_left = 0.0
 
     if training_start_mode != "resume":
         # Fresh and transfer runs start a new training history.
@@ -715,9 +770,6 @@ def setup_training(self):
     self._evaluation_rounds_remaining = 0
     self._evaluation_results = []
     self._training_rounds_since_evaluation = 0
-
-    self.best_completion_rate = 0.0
-    self.best_mean_time_left = 0.0
 
 
     if not hasattr(self, "policy_net"):
@@ -1204,6 +1256,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
                 + final_score_delta
             )
 
+        suicided = e.KILLED_SELF in events
+
         self._evaluation_results.append(
             {
                 "game_score": float(
@@ -1215,16 +1269,20 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
                 "time_left": int(
                     self.round_time_left_after_all_coins
                 ),
+                "suicided": bool(suicided),
             }
         )
+
+
 
         self._evaluation_rounds_remaining -= 1
 
         self.logger.info(
             "Evaluation round finished: score=%.1f "
-            "completed=%s time_left=%d remaining=%d.",
+            "completed=%s suicided=%s time_left=%d remaining=%d.",
             self.round_game_score,
             self.round_all_coins_collected,
+            suicided,
             self.round_time_left_after_all_coins,
             self._evaluation_rounds_remaining,
         )
@@ -1364,31 +1422,41 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 def reward_from_events(self, events: List[str]) -> float:
     """Map game events to scalar rewards.
 
-    This function centralizes reward shaping. Values chosen below are a starting
-    point and can be tuned. The function returns a float to allow fractional
-    rewards (e.g., small penalties for dropping bombs).
-
-    Design goals:
-    - Keep primary objective dominant: coins, kills, time efficiency.
-    - Keep shaping strictly auxiliary and bounded.
+    Suicide is handled separately because the environment emits both
+    KILLED_SELF and GOT_KILLED for the same death.
     """
-    # Split rewards into:
-    # - major outcomes (coin collection / death), which should dominate learning
-    # - shaping terms (movement heuristics), which are clipped per step
     major_sum = 0.0
     shaping_sum = 0.0
+
+    suicided = e.KILLED_SELF in events
+
     for event in events:
+        if event == e.KILLED_SELF:
+            # Added exactly once below.
+            continue
+
+        if suicided and event == e.GOT_KILLED:
+            # Prevent a suicide from also receiving the generic death penalty.
+            continue
+
         major_sum += MAJOR_REWARDS.get(event, 0.0)
         shaping_sum += SHAPING_REWARDS.get(event, 0.0)
 
-    # Keep shaping auxiliary and apply one direct dense time pressure term.
+    if suicided:
+        major_sum += SUICIDE_REWARD
+
     shaping_sum = float(np.clip(shaping_sum, -0.1, 0.1))
     reward_sum = major_sum + shaping_sum - STEP_TIME_COST
 
     if getattr(self, "log_dqn_details", False):
         self.logger.info(
-            f"Awarded {reward_sum:.3f} (major={major_sum:.3f}, shaping={shaping_sum:.3f}) "
-            f"for events {', '.join(events)}"
+            "Awarded %.3f (major=%.3f, shaping=%.3f, suicided=%s) "
+            "for events %s",
+            reward_sum,
+            major_sum,
+            shaping_sum,
+            suicided,
+            ", ".join(events),
         )
 
     return float(reward_sum)
