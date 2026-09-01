@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .callbacks import (ACTIONS, can_hit_crate_with_bomb, state_to_features, MODEL_FILE, BOARD_CHANNELS, BOARD_SIZE, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb, enemy_has_escape_after_bomb)
+from .callbacks import (ACTIONS, BOMB_POWER, BOMB_TIMER, can_hit_crate_with_bomb, explosion_tiles_from_bomb, state_to_features, MODEL_FILE, BOARD_CHANNELS, BOARD_SIZE, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb, enemy_has_escape_after_bomb)
 
 import events as e
 
@@ -63,6 +63,9 @@ def setup_training(self):
     self.replay_buffer = deque(maxlen=BUFFER_SIZE)
     self.steps_done = 0#
     self.position_history = deque(maxlen=4)  # Store the last 4 positions to detect oscillation
+    self.last_bomb_positions = None  # Store the last bomb positions to detect if the agent is trapped
+    self.steps_since_last_bomb = None  # Counter for steps since the last bomb was dropped
+
     
     # Device
     self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -188,14 +191,15 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             elif new_crate_distance > old_crate_distance:
                 events.append(e.MOVED_AWAY_FROM_CRATE)
 
-    if self_action == 'BOMB':
+    if self_action == 'BOMB' and old_game_state is not None and new_game_state is not None:
+        self.last_bomb_positions = old_game_state['self'][3]
+        self.steps_since_last_bomb = 0
+
         enemies = [pos for _, _, _, pos in new_game_state["others"] if pos is not None]
         old_pos = old_game_state['self'][3]
         field = new_game_state["field"]
         bombs = new_game_state["bombs"]
         explosion_map = old_game_state["explosion_map"]
-        
-        
 
         hits_enemy = can_hit_enemy_with_bomb(field, old_pos[0], old_pos[1], enemies)
         hits_crate = can_hit_crate_with_bomb(field, old_pos[0], old_pos[1])
@@ -206,7 +210,12 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             for enemy in enemies
         )
 
-        if escape_possible and traps_enemy:
+        closest_enemy_distance = min(
+            abs(enemy[0] - old_pos[0]) + abs(enemy[1] - old_pos[1])
+            for enemy in enemies
+        ) if enemies else float('inf')
+
+        if escape_possible and traps_enemy and hits_enemy and closest_enemy_distance <= BOMB_POWER:
             events.append(e.KILL_BOMB_DROPPED)
         elif escape_possible and hits_enemy:
             events.append(e.ENEMY_PRESSURE_BOMB_DROPPED)
@@ -214,6 +223,11 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             events.append(e.CRATE_BOMB_DROPPED)
         else:
             events.append(e.USELESS_BOMB_DROPPED)
+    elif self.steps_since_last_bomb is not None:
+        self.steps_since_last_bomb += 1  # Increment the counter if a bomb was dropped previously
+        if self.steps_since_last_bomb > BOMB_TIMER + 1:  # Reset after 5 steps to avoid false positives
+            self.steps_since_last_bomb = None
+            self.last_bomb_positions = None  # Reset the last bomb position after the bomb has exploded
 
     
 
@@ -255,15 +269,33 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             elif new_enemy_distance > old_enemy_distance:
                 events.append(e.MOVED_AWAY_FROM_ENEMY)
 
+
+    if old_state is not None and new_state is not None and self.last_bomb_positions is not None and self.steps_since_last_bomb is not None:
+        old_pos = old_game_state['self'][3]
+        new_pos = new_game_state['self'][3]
+        field = new_game_state['field']
+
+        old_dist = abs(old_pos[0] - self.last_bomb_positions[0]) + abs(old_pos[1] - self.last_bomb_positions[1])
+        new_dist = abs(new_pos[0] - self.last_bomb_positions[0]) + abs(new_pos[1] - self.last_bomb_positions[1])
+
+        own_blast_tiles = explosion_tiles_from_bomb(field, self.last_bomb_positions)
+
+        if new_dist > old_dist:
+            events.append(e.MOVED_AWAY_FROM_OWN_BOMB)
+        elif new_dist < old_dist:
+            events.append(e.MOVED_TOWARDS_OWN_BOMB)
+
+        if new_pos in own_blast_tiles:   
+            events.append(e.STAYED_IN_OWN_BLAST) 
+       
+        if old_pos in own_blast_tiles and new_pos not in own_blast_tiles:
+            events.append(e.ESCAPED_OWN_BOMB)
+
     
-    old_score = old_game_state["self"][1] if old_game_state is not None else 0
-    new_score = new_game_state["self"][1] if new_game_state is not None else old_score
-    delta_score = new_score - old_score
     # Update counters and train only every n environment steps.
     self.steps_done += 1
     events.append(e.STEP_PENALTY)  # Add a small penalty for each step to encourage faster completion
     reward = reward_from_events(self, events)
-    reward += 5 * delta_score
 
     # Store transition
     if old_state is not None:
@@ -297,33 +329,48 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     torch.save({"model_state_dict": self.policy_net.state_dict(), "steps_done": self.steps_done}, MODEL_FILE)
 
 
-def reward_from_events(self, events: List[str]) -> int:
+def reward_from_events(self, events: List[str]) -> float:
     game_rewards = {
-        e.COIN_COLLECTED: 1,
-        #e.BOMB_DROPPED: 10,
-        e.KILLED_OPPONENT: 300,
-        e.MOVED_CLOSE_TO_ENEMY: 2,
-        e.MOVED_AWAY_FROM_ENEMY: -2,
-        e.COIN_FOUND: 5,
-        e.CRATE_DESTROYED: 20,
-        e.KILL_BOMB_DROPPED: 120,
-        e.ENEMY_PRESSURE_BOMB_DROPPED: 25,
-        e.CRATE_BOMB_DROPPED: 30,
-        e.USELESS_BOMB_DROPPED: -60,
-        e.MOVED_CLOSE_TO_COIN: 0,
-        e.MOVED_AWAY_FROM_COIN: 0,
-        e.MOVED_TOWARDS_CRATE: 1.5,
-        e.MOVED_AWAY_FROM_CRATE: -1.5,
-        e.INVALID_ACTION: -20,
-        e.KILLED_SELF: -250,
-        e.GOT_KILLED: -120,
-        e.WAITED: -4,
-        e.OSCILLATION: -25,
-        e.STEP_PENALTY: -0.2,  # Small penalty for each step to encourage faster completion
+        # Real outcomes dominate, heuristic shaping only nudges.
+        e.KILLED_OPPONENT: 10.0,
+        e.KILLED_SELF: -10.0,
+        e.GOT_KILLED: -8.0,
+        e.SURVIVED_ROUND: 2.0,
+
+        # Coins and crates.
+        e.COIN_COLLECTED: 4.0,
+        e.COIN_FOUND: 1.0,
+        e.CRATE_DESTROYED: 1.5,
+
+        # Bomb placement heuristics.
+        e.KILL_BOMB_DROPPED: 2.5,
+        e.ENEMY_PRESSURE_BOMB_DROPPED: 1.0,
+        e.CRATE_BOMB_DROPPED: 0.8,
+        e.USELESS_BOMB_DROPPED: -4.0,
+
+        # Escape behavior after our own bomb.
+        e.MOVED_AWAY_FROM_OWN_BOMB: 0.8,
+        e.MOVED_TOWARDS_OWN_BOMB: -1.2,
+        e.STAYED_IN_OWN_BLAST: -2.5,
+        e.ESCAPED_OWN_BOMB: 3.0,
+
+        # Movement shaping.
+        e.MOVED_CLOSE_TO_ENEMY: 0.4,
+        e.MOVED_AWAY_FROM_ENEMY: -0.3,
+        e.MOVED_CLOSE_TO_COIN: 0.2,
+        e.MOVED_AWAY_FROM_COIN: -0.2,
+        e.MOVED_TOWARDS_CRATE: 0.15,
+        e.MOVED_AWAY_FROM_CRATE: -0.15,
+
+        # Bad behavior and time pressure.
+        e.INVALID_ACTION: -3.0,
+        e.WAITED: -0.4,
+        e.OSCILLATION: -1.0,
+        e.STEP_PENALTY: -0.05,
         }
-    reward_sum = 0
+    reward_sum = 0.0
     for event in events:
         if event in game_rewards:
             reward_sum += game_rewards[event]
-    self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
+    self.logger.info(f"Awarded {reward_sum:.2f} for events {', '.join(events)}")
     return reward_sum

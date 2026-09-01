@@ -40,8 +40,6 @@ def valid_action_mask(game_state):
             useful_against_crate = can_hit_crate_with_bomb(field, x, y)
             escape_possible = has_escape_after_bomb(field, bombs, explosion_map, (x, y))
 
-            
-
             mask[i] = bombs_left > 0 and escape_possible and (useful_against_enemy or useful_against_crate)
             continue
             
