@@ -1,6 +1,4 @@
 import os
-import atexit
-import pickle
 import random
 from collections import deque, namedtuple
 from typing import List
@@ -13,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from .callbacks import ACTIONS, state_to_features_cached, features_used_for_action, MODEL_FILE, BEST_MODEL_FILE, REPLAY_BUFFER_FILE, _feature_dimensions, _is_valid_action, _policy_action_mask
+from .callbacks import ACTIONS, state_to_features_cached, MODEL_FILE, BEST_MODEL_FILE, TRAINING_MODEL_FILE, _feature_dimensions, _is_valid_action, _policy_action_mask
 import events as e
 import settings as s
 
@@ -28,28 +26,20 @@ REQUIRED_HYPERPARAMETER_KEYS = (
     "BATCH_SIZE",
     "GAMMA",
     "LR",
-    "WEIGHT_DECAY",
     "TARGET_UPDATE",
     "MIN_REPLAY_SIZE",
     "TRAIN_EVERY_STEPS",
     "END_OF_ROUND_OPT_STEPS",
-    "CHECKPOINT_SAVE_EVERY_ROUNDS",
-    "REPLAY_SAVE_EVERY_ROUNDS",
-    "EVAL_EVERY_TRAINING_ROUNDS",
-    "EVAL_ROUNDS",
     "EPSILON_START",
     "EPSILON_END",
     "EPSILON_HALF_LIFE",
 )
 
 HYPERPARAMS_FILE = os.path.join(os.path.dirname(__file__), "Hyperparams.prm")
-CHECKPOINT_VERSION = 1
-REPLAY_BUFFER_VERSION = 1
-BEST_MODEL_METRIC_VERSION = 2
 
 
 
-from .Networks import DQN_v2 as DQN_net
+from .Networks import DQN_prev as DQN_net
 
 MAJOR_REWARDS = {
     e.COIN_COLLECTED: 1.0,
@@ -68,9 +58,10 @@ SHAPING_REWARDS = {
 }
 
 
+TERMINAL_OBJECTIVE_ALIGNMENT_WEIGHT = 0.1 # multiplying the current score to shape the reward
 ALL_COINS_CLEAR_BONUS = 5.0 # bonus reward for clearing all coins
 POST_CLEAR_TIME_LEFT_WEIGHT = 1.0 # rewarding the time till end of game after all coins are cleared
-STEP_TIME_COST = 0.0 # penalty for each step to encourage faster completion of objectives
+STEP_TIME_COST = 0.05 # penalty for each step to encourage faster completion of objectives
 
 
 def _pack_feature_array(arr: np.ndarray | None, dtype: np.dtype) -> np.ndarray | None:
@@ -121,15 +112,10 @@ def _load_hyperparameters(self) -> None:
     self.batch_size = int(parsed["BATCH_SIZE"])
     self.gamma = float(parsed["GAMMA"])
     self.lr = float(parsed["LR"])
-    self.weight_decay = float(parsed["WEIGHT_DECAY"])
     self.target_update = int(parsed["TARGET_UPDATE"])
     self.min_replay_size = int(parsed["MIN_REPLAY_SIZE"])
     self.train_every_steps = int(parsed["TRAIN_EVERY_STEPS"])
     self.end_of_round_opt_steps = int(parsed["END_OF_ROUND_OPT_STEPS"])
-    self.checkpoint_save_every_rounds = int(parsed["CHECKPOINT_SAVE_EVERY_ROUNDS"])
-    self.replay_save_every_rounds = int(parsed["REPLAY_SAVE_EVERY_ROUNDS"])
-    self.eval_every_training_rounds = int(parsed["EVAL_EVERY_TRAINING_ROUNDS"])
-    self.eval_rounds = int(parsed["EVAL_ROUNDS"])
     self.epsilon_start = float(parsed["EPSILON_START"])
     self.epsilon_end = float(parsed["EPSILON_END"])
     self.tau = float(parsed["EPSILON_HALF_LIFE"])
@@ -141,21 +127,6 @@ def _load_hyperparameters(self) -> None:
         )
     )
     self.steps_done = int(parsed.get("STEPS_DONE", 0.0))
-    self.best_metric_version = int(parsed.get("BEST_MODEL_METRIC_VERSION", 0.0))
-    self.best_score = float(parsed.get("BEST_MODEL_SCORE", -1.0))
-    self.best_score_coins_collected = float(parsed.get("BEST_MODEL_COINS_COLLECTED", 0.0))
-    self.best_score_enemies_killed = float(parsed.get("BEST_MODEL_ENEMIES_KILLED", 0.0))
-    self.best_score_time_left_after_all_coins = float(
-        parsed.get("BEST_MODEL_TIME_LEFT_AFTER_ALL_COINS", 0.0)
-    )
-    self.best_score_completion_rate = float(parsed.get("BEST_MODEL_COMPLETION_RATE", 0.0))
-    if self.best_metric_version != BEST_MODEL_METRIC_VERSION:
-        self.best_metric_version = BEST_MODEL_METRIC_VERSION
-        self.best_score = -1.0
-        self.best_score_coins_collected = 0.0
-        self.best_score_enemies_killed = 0.0
-        self.best_score_time_left_after_all_coins = 0.0
-        self.best_score_completion_rate = 0.0
 
     if self.buffer_size <= 0:
         raise RuntimeError("BUFFER_SIZE must be > 0.")
@@ -163,16 +134,6 @@ def _load_hyperparameters(self) -> None:
         raise RuntimeError("BATCH_SIZE must be > 0.")
     if self.min_replay_size <= 0:
         raise RuntimeError("MIN_REPLAY_SIZE must be > 0.")
-    if self.weight_decay < 0:
-        raise RuntimeError("WEIGHT_DECAY must be >= 0.")
-    if self.replay_save_every_rounds <= 0:
-        raise RuntimeError("REPLAY_SAVE_EVERY_ROUNDS must be > 0.")
-    if self.checkpoint_save_every_rounds <= 0:
-        raise RuntimeError("CHECKPOINT_SAVE_EVERY_ROUNDS must be > 0.")
-    if self.eval_every_training_rounds <= 0:
-        raise RuntimeError("EVAL_EVERY_TRAINING_ROUNDS must be > 0.")
-    if self.eval_rounds <= 0:
-        raise RuntimeError("EVAL_ROUNDS must be > 0.")
     if self.batch_size > self.buffer_size:
         raise RuntimeError(
             f"BATCH_SIZE ({self.batch_size}) must not exceed BUFFER_SIZE ({self.buffer_size})."
@@ -182,14 +143,12 @@ def _load_hyperparameters(self) -> None:
 def _save_hyperparameters(self) -> None:
     """Update runtime state fields in Hyperparams.prm without touching fixed parameters."""
     runtime_updates = {
-        "EPSILON_LAST": f"{self.epsilon_current:.5f}",
+        "EPSILON_LAST": f"{self.epsilon_current:.10f}",
         "STEPS_DONE": f"{int(self.steps_done)}",
-        "BEST_MODEL_METRIC_VERSION": f"{BEST_MODEL_METRIC_VERSION}",
-        "BEST_MODEL_SCORE": f"{float(self.best_score):.5f}",
-        "BEST_MODEL_COINS_COLLECTED": f"{float(self.best_score_coins_collected):.5f}",
-        "BEST_MODEL_ENEMIES_KILLED": f"{float(self.best_score_enemies_killed):.5f}",
-        "BEST_MODEL_TIME_LEFT_AFTER_ALL_COINS": f"{float(self.best_score_time_left_after_all_coins):.5f}",
-        "BEST_MODEL_COMPLETION_RATE": f"{float(self.best_score_completion_rate):.5f}",
+        "BEST_MODEL_SCORE": f"{float(self.best_score):.1f}",
+        "BEST_MODEL_COINS_COLLECTED": f"{int(self.best_score_coins_collected)}",
+        "BEST_MODEL_ENEMIES_KILLED": f"{int(self.best_score_enemies_killed)}",
+        "BEST_MODEL_TIME_LEFT_AFTER_ALL_COINS": f"{int(self.best_score_time_left_after_all_coins)}",
     }
 
     lines: list[str] = []
@@ -216,201 +175,13 @@ def _save_hyperparameters(self) -> None:
         fp.writelines(lines)
 
 
-def _atomic_torch_save(payload, path: str) -> None:
-    """Write a torch checkpoint without exposing a partially written file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    temporary_path = f"{path}.tmp.{os.getpid()}"
-    try:
-        torch.save(payload, temporary_path)
-        os.replace(temporary_path, path)
-    finally:
-        if os.path.exists(temporary_path):
-            os.remove(temporary_path)
-
-
-def _save_training_checkpoint(self) -> None:
-    """Persist all state needed to resume optimization of the same task."""
-    checkpoint = {
-        "checkpoint_version": CHECKPOINT_VERSION,
-        "policy_state_dict": self.policy_net.state_dict(),
-        "target_state_dict": self.target_net.state_dict(),
-        "optimizer_state_dict": self.optimizer.state_dict(),
-        "steps_done": int(self.steps_done),
-        "gradient_steps": int(self.gradient_steps),
-        "epsilon_current": float(self.epsilon_current),
-        "best_metric_version": BEST_MODEL_METRIC_VERSION,
-        "best_score": float(self.best_score),
-        "best_score_coins_collected": float(self.best_score_coins_collected),
-        "best_score_enemies_killed": float(self.best_score_enemies_killed),
-        "best_score_time_left_after_all_coins": float(
-            self.best_score_time_left_after_all_coins
-        ),
-        "best_score_completion_rate": float(self.best_score_completion_rate),
-        "evaluation_round": bool(self._evaluation_round),
-        "evaluation_rounds_remaining": int(self._evaluation_rounds_remaining),
-        "training_rounds_since_eval": int(self._training_rounds_since_eval),
-        "evaluation_results": list(self._evaluation_results),
-        "grid_channels": int(self.grid_channels),
-        "scalar_size": int(self.scalar_size),
-        "actions": tuple(ACTIONS),
-    }
-    _atomic_torch_save(checkpoint, MODEL_FILE)
-    self._checkpoint_dirty = False
-
-
-def _save_replay_buffer(self) -> None:
-    """Persist the packed replay buffer as a separate atomic checkpoint."""
-    transitions = list(self.replay_buffer)
-    if self._pending_transition_key is not None and transitions:
-        # A process stopping between a step callback and end_of_round cannot
-        # know whether this provisional transition is terminal. Dropping one
-        # entry is safer than restoring an invalid bootstrap target.
-        transitions.pop()
-
-    payload = {
-        "replay_version": REPLAY_BUFFER_VERSION,
-        "capacity": int(self.buffer_size),
-        "grid_channels": int(self.grid_channels),
-        "scalar_size": int(self.scalar_size),
-        "actions": tuple(ACTIONS),
-        "steps_done": int(self.steps_done),
-        "transitions": transitions,
-    }
-
-    os.makedirs(os.path.dirname(REPLAY_BUFFER_FILE), exist_ok=True)
-    temporary_path = f"{REPLAY_BUFFER_FILE}.tmp.{os.getpid()}"
-    try:
-        with open(temporary_path, "wb") as fp:
-            pickle.dump(payload, fp, protocol=pickle.HIGHEST_PROTOCOL)
-            fp.flush()
-            os.fsync(fp.fileno())
-        os.replace(temporary_path, REPLAY_BUFFER_FILE)
-    finally:
-        if os.path.exists(temporary_path):
-            os.remove(temporary_path)
-
-    self._replay_dirty = False
-    self.logger.info(
-        "Saved replay buffer with %d transitions to %s.",
-        len(transitions), REPLAY_BUFFER_FILE,
-    )
-
-
-def _load_replay_buffer(self) -> None:
-    """Load and validate replay data for a resumed training run."""
-    if not os.path.isfile(REPLAY_BUFFER_FILE):
-        self.logger.info("No replay buffer checkpoint found at %s.", REPLAY_BUFFER_FILE)
-        return
-
-    with open(REPLAY_BUFFER_FILE, "rb") as fp:
-        payload = pickle.load(fp)
-
-    if not isinstance(payload, dict) or payload.get("replay_version") != REPLAY_BUFFER_VERSION:
-        raise RuntimeError(f"Unsupported replay buffer format in {REPLAY_BUFFER_FILE}.")
-    if tuple(payload.get("actions", ())) != tuple(ACTIONS):
-        raise RuntimeError("Replay buffer action ordering does not match the current agent.")
-    if int(payload.get("grid_channels", -1)) != int(self.grid_channels):
-        raise RuntimeError("Replay buffer grid feature count does not match the current agent.")
-    if int(payload.get("scalar_size", -1)) != int(self.scalar_size):
-        raise RuntimeError("Replay buffer scalar feature count does not match the current agent.")
-
-    transitions = payload.get("transitions")
-    if not isinstance(transitions, list) or not all(
-        isinstance(transition, Transition) for transition in transitions
-    ):
-        raise RuntimeError(f"Invalid transitions in replay buffer {REPLAY_BUFFER_FILE}.")
-
-    self.replay_buffer.extend(transitions[-self.buffer_size:])
-    self._replay_dirty = False
-    self.logger.info(
-        "Loaded %d replay transitions from %s.",
-        len(self.replay_buffer), REPLAY_BUFFER_FILE,
-    )
-
-
-def _save_training_at_exit(self) -> None:
-    """Best-effort persistence for a clean interpreter shutdown."""
-    try:
-        if getattr(self, "_checkpoint_dirty", False):
-            _save_training_checkpoint(self)
-            _save_hyperparameters(self)
-        if getattr(self, "_replay_dirty", False):
-            _save_replay_buffer(self)
-    except Exception:
-        self.logger.exception("Could not save DQN training state during shutdown.")
-
-
-def _restore_training_checkpoint(self) -> None:
-    """Restore optimizer and runtime state after the policy was loaded in setup."""
-    checkpoint = getattr(self, "_resume_checkpoint", None)
-    if not checkpoint or "policy_state_dict" not in checkpoint:
-        return
-
-    if checkpoint.get("checkpoint_version") != CHECKPOINT_VERSION:
-        raise RuntimeError(
-            f"Unsupported training checkpoint version: "
-            f"{checkpoint.get('checkpoint_version')}."
-        )
-
-    if tuple(checkpoint.get("actions", ACTIONS)) != tuple(ACTIONS):
-        raise RuntimeError("Training checkpoint action ordering does not match the current agent.")
-    if int(checkpoint.get("grid_channels", self.grid_channels)) != int(self.grid_channels):
-        raise RuntimeError("Training checkpoint grid features do not match the current agent.")
-    if int(checkpoint.get("scalar_size", self.scalar_size)) != int(self.scalar_size):
-        raise RuntimeError("Training checkpoint scalar features do not match the current agent.")
-
-    self.target_net.load_state_dict(checkpoint["target_state_dict"])
-    self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    self.steps_done = int(checkpoint.get("steps_done", self.steps_done))
-    self.gradient_steps = int(checkpoint.get("gradient_steps", self.gradient_steps))
-    self.epsilon_current = float(
-        np.clip(
-            checkpoint.get("epsilon_current", self.epsilon_current),
-            self.epsilon_end,
-            self.epsilon_start,
-        )
-    )
-    if checkpoint.get("best_metric_version") == BEST_MODEL_METRIC_VERSION:
-        self.best_score = float(checkpoint.get("best_score", self.best_score))
-        self.best_score_coins_collected = float(
-            checkpoint.get("best_score_coins_collected", self.best_score_coins_collected)
-        )
-        self.best_score_enemies_killed = float(
-            checkpoint.get("best_score_enemies_killed", self.best_score_enemies_killed)
-        )
-        self.best_score_time_left_after_all_coins = float(
-            checkpoint.get(
-                "best_score_time_left_after_all_coins",
-                self.best_score_time_left_after_all_coins,
-            )
-        )
-        self.best_score_completion_rate = float(
-            checkpoint.get("best_score_completion_rate", self.best_score_completion_rate)
-        )
-    else:
-        self.best_score = -1.0
-        self.best_score_coins_collected = 0.0
-        self.best_score_enemies_killed = 0.0
-        self.best_score_time_left_after_all_coins = 0.0
-        self.best_score_completion_rate = 0.0
-
-    self._evaluation_round = bool(checkpoint.get("evaluation_round", False))
-    self._evaluation_rounds_remaining = int(
-        checkpoint.get("evaluation_rounds_remaining", 0)
-    )
-    self._training_rounds_since_eval = int(
-        checkpoint.get("training_rounds_since_eval", 0)
-    )
-    self._evaluation_results = list(checkpoint.get("evaluation_results", []))
-
-
-def _advance_epsilon(self) -> None:
-    """Advance epsilon without performing per-step filesystem writes."""
+def _advance_and_persist_epsilon(self) -> None:
+    """Advance epsilon by one environment step and persist to Hyperparams.prm."""
     decay_factor = float(np.exp(-np.log(2.0) / self.tau))
     self.epsilon_current = float(
         self.epsilon_end + (self.epsilon_current - self.epsilon_end) * decay_factor
     )
-    self._checkpoint_dirty = True
+    _save_hyperparameters(self)
 
 
 def _round_objective_score(self) -> float:
@@ -422,61 +193,27 @@ def _round_objective_score(self) -> float:
         + POST_CLEAR_TIME_LEFT_WEIGHT * time_left_fraction
     )
 
-
-def _transition_key(game_state: dict | None, action: str) -> tuple | None:
-    """Identify the environment action represented by a replay transition."""
-    if game_state is None:
-        return None
-
-    self_state = game_state.get("self")
-    self_pos = self_state[-1] if self_state is not None else None
-    return (
-        game_state.get("round"),
-        game_state.get("step"),
-        self_pos,
-        ACTION_TO_INDEX.get(action, ACTION_TO_INDEX["WAIT"]),
-    )
-
 def setup_training(self):
     """Initialise training-related objects for the agent."""
 
     _load_hyperparameters(self)
 
-    training_start_mode = getattr(self, "training_start_mode", "resume")
-    if training_start_mode != "resume":
-        # Transfer and fresh runs deliberately start a new task history. The
-        # source model contributes weights only.
-        self.epsilon_current = self.epsilon_start
-        self.steps_done = 0
-        self.best_score = -1.0
-        self.best_score_coins_collected = 0
-        self.best_score_enemies_killed = 0
-        self.best_score_time_left_after_all_coins = 0
-        self.best_score_completion_rate = 0.0
-
     self.replay_buffer = deque(maxlen=self.buffer_size)
-    self._replay_dirty = False
-    self._checkpoint_dirty = training_start_mode != "resume"
-    self._rounds_since_checkpoint_save = 0
-    self._rounds_since_replay_save = 0
     self.replay_start_size = min(
         self.buffer_size,
         max(self.min_replay_size, self.batch_size),
     )
     self.gradient_steps = 0
-    self._evaluation_round = False
-    self._evaluation_rounds_remaining = 0
-    self._training_rounds_since_eval = 0
-    self._evaluation_results = []
-    self._last_evaluation_event_key = None
     self.round_coins_collected = 0
     self.round_number_kills = 0
+    self.best_score = -1
+    self.best_score_coins_collected = 0
+    self.best_score_enemies_killed = 0
+    self.best_score_time_left_after_all_coins = 0
     self.round_time_left_after_all_coins = 0
-    self.round_all_coins_cleared = False
     self.previous_old_position = None
     self.previous_velocity = (0,0)
-    self._pending_transition_key = None
-
+    self.position_history = deque(maxlen=4)
     self._last_action_index = ACTION_TO_INDEX["WAIT"]
 
 
@@ -491,21 +228,9 @@ def setup_training(self):
     for param in self.target_net.parameters():
         param.requires_grad = False 
 
-    self.optimizer = optim.AdamW(
-        self.policy_net.parameters(),
-        lr=self.lr,
-        weight_decay=self.weight_decay,
-    )
-
-    if training_start_mode == "resume":
-        _restore_training_checkpoint(self)
-        _load_replay_buffer(self)
+    self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=self.lr) #weight_decay=1e-4)
 
     self.loss_fn = nn.SmoothL1Loss()
-
-    if not getattr(self, "_replay_exit_handler_registered", False):
-        atexit.register(_save_training_at_exit, self)
-        self._replay_exit_handler_registered = True
 
 
     def get_epsilon_value(agent):
@@ -516,16 +241,12 @@ def setup_training(self):
 
     
     self.logger.info(
-        "Training initialized: buffer=%d, replay_start=%d, batch=%d, "
-        "gamma=%.3f, lr=%g, weight_decay=%g, start_mode=%s, replay=%d",
+        "Training initialized: buffer=%d, replay_start=%d, batch=%d, gamma=%.3f, lr=%g",
         self.buffer_size,
         self.replay_start_size,
         self.batch_size,
         self.gamma,
         self.lr,
-        self.weight_decay,
-        training_start_mode,
-        len(self.replay_buffer),
     )
 
 
@@ -533,18 +254,10 @@ def optimize_model(self):
 
     '''Perform double DQN optimization step on a batch of transitions from the replay buffer.'''
 
-    replay_population = list(self.replay_buffer)
-
-    # The most recent step is provisional until either another action occurs
-    # or end_of_round marks it terminal. Do not train on a bootstrap target
-    # that may turn out to cross an episode boundary.
-    if self._pending_transition_key is not None and replay_population:
-        replay_population.pop()
-
-    if len(replay_population) < self.replay_start_size:
+    if len(self.replay_buffer) < self.replay_start_size:
         return None
 
-    batch = random.sample(replay_population, self.batch_size)
+    batch = random.sample(self.replay_buffer, self.batch_size)
 
     states_grid_np = np.stack(
         [transition.grid for transition in batch],
@@ -726,7 +439,6 @@ def optimize_model(self):
     )
 
     self.optimizer.step()
-    self._checkpoint_dirty = True
 
     self.gradient_steps += 1
 
@@ -772,11 +484,6 @@ def game_events_occurred(
         )
 
     events = list(events)
-
-    # Receiving another step callback confirms that the transition appended by
-    # the preceding callback was non-terminal. The transition appended below
-    # remains pending until the next callback or end_of_round.
-    self._pending_transition_key = None
 
     # ------------------------------------------------------------
     # Bookkeeping
@@ -863,7 +570,6 @@ def game_events_occurred(
         if old_coins > 0 and new_coins == 0:
             time_left = max(0, int(s.MAX_STEPS) - int(new_game_state.get("step", 0)))
             self.round_time_left_after_all_coins = time_left
-            self.round_all_coins_cleared = True
             reward += ALL_COINS_CLEAR_BONUS
 
             if getattr(self, "log_dqn_details", False):
@@ -873,21 +579,11 @@ def game_events_occurred(
                     time_left,
                 )
 
-    if self._evaluation_round:
-        # Greedy evaluation must not alter replay, epsilon, the optimizer, or
-        # the target network. Remember whether this final action already had a
-        # normal event callback so end_of_round can avoid double bookkeeping.
-        self._last_evaluation_event_key = _transition_key(old_game_state, self_action)
-        self._last_action_index = ACTION_TO_INDEX.get(
-            self_action, ACTION_TO_INDEX["WAIT"]
-        )
-        return
-
     # ------------------------------------------------------------
     # Convert states into neural-network features
     # ------------------------------------------------------------
 
-    old_feats = features_used_for_action(self, old_game_state)
+    old_feats = state_to_features_cached(self, old_game_state)
     self._last_action_index = ACTION_TO_INDEX.get(self_action, ACTION_TO_INDEX["WAIT"])
     new_feats = state_to_features_cached(self, new_game_state)
 
@@ -919,165 +615,56 @@ def game_events_occurred(
                 reward,
             )
         )
-        self._pending_transition_key = _transition_key(old_game_state, self_action)
-        self._replay_dirty = True
 
         # --------------------------------------------------------
         # Training
         # --------------------------------------------------------
 
         self.steps_done += 1
-        _advance_epsilon(self)
+        _advance_and_persist_epsilon(self)
 
         if self.steps_done % self.train_every_steps == 0:
             optimize_model(self)
 
-def _reset_round_state(self) -> None:
-    """Reset episode-local bookkeeping without changing training state."""
-    self.round_coins_collected = 0
-    self.round_number_kills = 0
-    self.round_time_left_after_all_coins = 0
-    self.round_all_coins_cleared = False
-    self.previous_old_position = None
-    self.previous_velocity = (0, 0)
-    self._pending_transition_key = None
-    self._last_evaluation_event_key = None
-    self._last_action_index = ACTION_TO_INDEX["WAIT"]
-    self._cached_state_key = None
-    self._cached_features = None
-    self._acted_state_key = None
-    self._acted_features = None
-
-
-def _complete_evaluation_block(self) -> None:
-    """Select the best checkpoint from aggregate greedy evaluation metrics."""
-    results = self._evaluation_results
-    mean_score = float(np.mean([result["score"] for result in results]))
-    mean_coins = float(np.mean([result["coins"] for result in results]))
-    mean_kills = float(np.mean([result["kills"] for result in results]))
-    mean_time_left = float(np.mean([result["time_left"] for result in results]))
-    completion_rate = float(np.mean([result["cleared"] for result in results]))
-
-    candidate_key = (mean_coins, completion_rate, mean_time_left, mean_kills)
-    best_key = (
-        self.best_score_coins_collected,
-        self.best_score_completion_rate,
-        self.best_score_time_left_after_all_coins,
-        self.best_score_enemies_killed,
-    )
-    is_first_evaluation = self.best_score < 0.0
-
-    self.logger.info(
-        "Greedy evaluation over %d rounds: mean_score=%.3f mean_coins=%.3f "
-        "completion_rate=%.3f mean_time_left=%.1f mean_kills=%.3f",
-        len(results), mean_score, mean_coins, completion_rate,
-        mean_time_left, mean_kills,
-    )
-
-    if is_first_evaluation or candidate_key > best_key:
-        self.best_score = mean_score
-        self.best_score_coins_collected = mean_coins
-        self.best_score_enemies_killed = mean_kills
-        self.best_score_time_left_after_all_coins = mean_time_left
-        self.best_score_completion_rate = completion_rate
-        _atomic_torch_save(self.policy_net.state_dict(), BEST_MODEL_FILE)
-        self.logger.info(
-            "Saved new best model from aggregate greedy evaluation "
-            "(mean_coins=%.3f, completion_rate=%.3f).",
-            mean_coins, completion_rate,
-        )
-
-    self._evaluation_round = False
-    self._evaluation_rounds_remaining = 0
-    self._training_rounds_since_eval = 0
-    self._evaluation_results = []
-
-
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
     self._last_action_index = ACTION_TO_INDEX.get(last_action, ACTION_TO_INDEX["WAIT"])
-    terminal_key = _transition_key(last_game_state, last_action)
+    last_state = state_to_features_cached(self, last_game_state)
+    reward = reward_from_events(self, events)
+    current_score = _round_objective_score(self)
 
-    if self._evaluation_round:
-        # A fatal final action has no game_events_occurred callback. Include its
-        # outcome once; surviving final actions were already counted there.
-        if self._last_evaluation_event_key != terminal_key:
-            self.round_coins_collected += events.count(e.COIN_COLLECTED)
-            self.round_number_kills += events.count(e.KILLED_OPPONENT)
+    # Keep terminal bonus aligned with the exact best-model objective.
+    terminal_bonus = current_score * TERMINAL_OBJECTIVE_ALIGNMENT_WEIGHT
 
-        current_score = _round_objective_score(self)
-        self._evaluation_results.append({
-            "score": current_score,
-            "coins": float(self.round_coins_collected),
-            "kills": float(self.round_number_kills),
-            "time_left": float(self.round_time_left_after_all_coins),
-            "cleared": float(self.round_all_coins_cleared),
-        })
-        self._evaluation_rounds_remaining -= 1
-        self._checkpoint_dirty = True
+    reward += terminal_bonus
+    if getattr(self, "log_dqn_details", False):
         self.logger.info(
-            "Greedy evaluation round complete: score=%.3f coins=%d remaining=%d",
-            current_score, self.round_coins_collected,
-            self._evaluation_rounds_remaining,
+            "End of round: objective_score=%.3f terminal_bonus=%.3f total_terminal_reward=%.3f",
+            current_score, terminal_bonus, reward,
         )
 
-        evaluation_block_completed = self._evaluation_rounds_remaining <= 0
-        if evaluation_block_completed:
-            _complete_evaluation_block(self)
-
-        _reset_round_state(self)
-        if evaluation_block_completed:
-            _save_training_checkpoint(self)
-            _save_hyperparameters(self)
-        return
-
-    terminal_already_stored = (
-        self._pending_transition_key == terminal_key
-        and bool(self.replay_buffer)
-    )
-
-    # Dead agents do not receive game_events_occurred for their fatal action,
-    # so its bookkeeping and transition still need to be added here.
-    if not terminal_already_stored:
-        self.round_coins_collected += events.count(e.COIN_COLLECTED)
-        self.round_number_kills += events.count(e.KILLED_OPPONENT)
-
-    if terminal_already_stored:
-        # The normal step callback already stored all immediate rewards,
-        # including the all-coins-clear bonus. Convert that entry in place so
-        # the final action appears exactly once and never bootstraps past done.
-        transition = self.replay_buffer[-1]
-        self.replay_buffer[-1] = transition._replace(
-            next_grid=None,
-            next_scalar=None,
-            next_action_mask=None,
-        )
-        self._replay_dirty = True
-    else:
-        reward = reward_from_events(self, events)
-        last_state = features_used_for_action(self, last_game_state)
-        if last_state is not None:
-            last_grid, last_scalar = last_state
-            self.replay_buffer.append(
-                Transition(
-                    _pack_normalized_feature_array(last_grid),
-                    _pack_normalized_feature_array(last_scalar),
-                    ACTION_TO_INDEX.get(last_action, ACTION_TO_INDEX["WAIT"]),
-                    None,
-                    None,
-                    None,
-                    reward,
-                )
+    # terminal state: next_state is None
+    if last_state is not None:
+        last_grid, last_scalar = last_state
+        self.replay_buffer.append(
+            Transition(
+                _pack_normalized_feature_array(last_grid),
+                _pack_normalized_feature_array(last_scalar),
+                ACTION_TO_INDEX.get(last_action, ACTION_TO_INDEX["WAIT"]),
+                None,
+                None,
+                None,
+                reward,
             )
-            self._replay_dirty = True
-            self.steps_done += 1
-            _advance_epsilon(self)
-
-    self._pending_transition_key = None
+        )
 
     # Do some final optimization passes
     for _ in range(self.end_of_round_opt_steps):
         optimize_model(self)
+
+    # Save latest policy network to MODEL_FILE; TRAINING_MODEL_FILE is the read-only start checkpoint
+    os.makedirs(os.path.dirname(MODEL_FILE), exist_ok=True)
+    torch.save(self.policy_net.state_dict(), MODEL_FILE)
 
     if self.round_time_left_after_all_coins > 0:
         time_left_fraction = float(self.round_time_left_after_all_coins) / float(max(1, s.MAX_STEPS))
@@ -1086,33 +673,22 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
             self.round_time_left_after_all_coins,
             time_left_fraction,
         )
-    self._training_rounds_since_eval += 1
-    self._checkpoint_dirty = True
-    starting_evaluation = False
-    if self._training_rounds_since_eval >= self.eval_every_training_rounds:
-        self._evaluation_round = True
-        self._evaluation_rounds_remaining = self.eval_rounds
-        self._evaluation_results = []
-        starting_evaluation = True
+    if current_score > self.best_score:
+        self.best_score = current_score
+        self.best_score_coins_collected = int(self.round_coins_collected)
+        self.best_score_enemies_killed = int(self.round_number_kills)
+        self.best_score_time_left_after_all_coins = int(self.round_time_left_after_all_coins)
+        torch.save(self.policy_net.state_dict(), BEST_MODEL_FILE)
         self.logger.info(
-            "Starting %d greedy evaluation rounds after %d training rounds.",
-            self.eval_rounds, self._training_rounds_since_eval,
+            "Saved new best model with score %.3f.",
+            current_score,
         )
 
-    self._rounds_since_checkpoint_save += 1
-    if (
-        starting_evaluation
-        or self._rounds_since_checkpoint_save >= self.checkpoint_save_every_rounds
-    ):
-        _save_training_checkpoint(self)
-        self._rounds_since_checkpoint_save = 0
-    self._rounds_since_replay_save += 1
-    if self._rounds_since_replay_save >= self.replay_save_every_rounds:
-        _save_replay_buffer(self)
-        self._rounds_since_replay_save = 0
-
-    _reset_round_state(self)
-
+    self.round_coins_collected = 0
+    self.round_number_kills = 0
+    self.round_time_left_after_all_coins = 0
+    self.previous_old_position = None
+    self.position_history.clear()
     _save_hyperparameters(self)
 
 
