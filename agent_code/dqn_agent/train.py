@@ -3,6 +3,8 @@ import random
 from collections import deque, namedtuple
 from typing import List
 import copy
+import atexit
+import pickle
 
 import numpy as np
 
@@ -15,9 +17,9 @@ from .callbacks import (
     ACTIONS,
     state_to_features_cached,
     features_used_for_action,
-    MODEL_FILE,
+    LATEST_CHECKPOINT_FILE,
     BEST_MODEL_FILE,
-    TRAINING_MODEL_FILE,
+    REPLAY_BUFFER_FILE,
     _feature_dimensions,
     _is_valid_action,
     _policy_action_mask,
@@ -47,6 +49,10 @@ REQUIRED_HYPERPARAMETER_KEYS = (
 )
 
 HYPERPARAMS_FILE = os.path.join(os.path.dirname(__file__), "Hyperparams.prm")
+
+CHECKPOINT_VERSION = 1
+REPLAY_BUFFER_VERSION = 1
+REPLAY_SAVE_EVERY_ROUNDS = 100
 
 
 
@@ -199,6 +205,233 @@ def _save_hyperparameters(self) -> None:
     with open(HYPERPARAMS_FILE, "w", encoding="utf-8") as fp:
         fp.writelines(lines)
 
+def _atomic_torch_save(payload, path: str) -> None:
+    """Save a torch object without exposing a partially written file."""
+    temporary_path = f"{path}.tmp.{os.getpid()}"
+
+    try:
+        torch.save(payload, temporary_path)
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+
+def _save_latest_checkpoint(self) -> None:
+    """Save everything required to resume the same training task."""
+    checkpoint = {
+        "checkpoint_version": CHECKPOINT_VERSION,
+        "policy_state_dict": self.policy_net.state_dict(),
+        "target_state_dict": self.target_net.state_dict(),
+        "optimizer_state_dict": self.optimizer.state_dict(),
+        "steps_done": int(self.steps_done),
+        "gradient_steps": int(self.gradient_steps),
+        "epsilon_current": float(self.epsilon_current),
+        "best_score": float(self.best_score),
+        "best_score_coins_collected": int(
+            self.best_score_coins_collected
+        ),
+        "best_score_enemies_killed": int(
+            self.best_score_enemies_killed
+        ),
+        "best_score_time_left_after_all_coins": int(
+            self.best_score_time_left_after_all_coins
+        ),
+        "grid_channels": int(self.grid_channels),
+        "scalar_size": int(self.scalar_size),
+        "actions": tuple(ACTIONS),
+    }
+
+    _atomic_torch_save(
+        checkpoint,
+        LATEST_CHECKPOINT_FILE,
+    )
+
+def _restore_latest_checkpoint(self) -> None:
+    """Restore the non-policy state of a loaded latest checkpoint."""
+    checkpoint = getattr(self, "_resume_checkpoint", None)
+
+    if checkpoint is None:
+        return
+
+    if checkpoint.get("checkpoint_version") != CHECKPOINT_VERSION:
+        raise RuntimeError(
+            "Unsupported checkpoint version: "
+            f"{checkpoint.get('checkpoint_version')}"
+        )
+
+    if tuple(checkpoint.get("actions", ())) != tuple(ACTIONS):
+        raise RuntimeError(
+            "Checkpoint action ordering is incompatible."
+        )
+
+    if int(checkpoint.get("grid_channels", -1)) != int(
+        self.grid_channels
+    ):
+        raise RuntimeError(
+            "Checkpoint grid feature count is incompatible."
+        )
+
+    if int(checkpoint.get("scalar_size", -1)) != int(
+        self.scalar_size
+    ):
+        raise RuntimeError(
+            "Checkpoint scalar feature count is incompatible."
+        )
+
+    self.target_net.load_state_dict(
+        checkpoint["target_state_dict"]
+    )
+    self.optimizer.load_state_dict(
+        checkpoint["optimizer_state_dict"]
+    )
+
+    self.steps_done = int(
+        checkpoint.get("steps_done", self.steps_done)
+    )
+    self.gradient_steps = int(
+        checkpoint.get("gradient_steps", self.gradient_steps)
+    )
+    self.epsilon_current = float(
+        np.clip(
+            checkpoint.get(
+                "epsilon_current",
+                self.epsilon_current,
+            ),
+            self.epsilon_end,
+            self.epsilon_start,
+        )
+    )
+
+    self.best_score = float(
+    checkpoint.get("best_score", -1.0)
+)
+    self.best_score_coins_collected = int(
+        checkpoint.get("best_score_coins_collected", 0)
+    )
+    self.best_score_enemies_killed = int(
+        checkpoint.get("best_score_enemies_killed", 0)
+    )
+    self.best_score_time_left_after_all_coins = int(
+        checkpoint.get(
+            "best_score_time_left_after_all_coins",
+            0,
+        )
+    )
+def _save_replay_buffer(self) -> None:
+    """Save replay memory and compatibility metadata atomically."""
+    transitions = list(self.replay_buffer)
+
+    if self._pending_transition_key is not None and transitions:
+        # Its terminal status is not yet known.
+        transitions.pop()
+
+    payload = {
+        "replay_version": REPLAY_BUFFER_VERSION,
+        "capacity": int(self.buffer_size),
+        "grid_channels": int(self.grid_channels),
+        "scalar_size": int(self.scalar_size),
+        "actions": tuple(ACTIONS),
+        "transitions": transitions,
+    }
+
+    temporary_path = (
+        f"{REPLAY_BUFFER_FILE}.tmp.{os.getpid()}"
+    )
+
+    try:
+        with open(temporary_path, "wb") as replay_file:
+            pickle.dump(
+                payload,
+                replay_file,
+                protocol=pickle.HIGHEST_PROTOCOL,
+            )
+            replay_file.flush()
+            os.fsync(replay_file.fileno())
+
+        os.replace(
+            temporary_path,
+            REPLAY_BUFFER_FILE,
+        )
+
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+    self.logger.info(
+        "Saved %d replay transitions to %s.",
+        len(transitions),
+        REPLAY_BUFFER_FILE,
+    )
+
+def _load_replay_buffer(self) -> None:
+    """Load replay memory when resuming the same training task."""
+    if not os.path.isfile(REPLAY_BUFFER_FILE):
+        self.logger.warning(
+            "No replay buffer found at %s.",
+            REPLAY_BUFFER_FILE,
+        )
+        return
+
+    with open(REPLAY_BUFFER_FILE, "rb") as replay_file:
+        payload = pickle.load(replay_file)
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("Invalid replay-buffer file.")
+
+    if payload.get("replay_version") != REPLAY_BUFFER_VERSION:
+        raise RuntimeError(
+            "Unsupported replay-buffer version: "
+            f"{payload.get('replay_version')}"
+        )
+
+    if tuple(payload.get("actions", ())) != tuple(ACTIONS):
+        raise RuntimeError(
+            "Replay-buffer action ordering is incompatible."
+        )
+
+    if int(payload.get("grid_channels", -1)) != int(
+        self.grid_channels
+    ):
+        raise RuntimeError(
+            "Replay-buffer grid features are incompatible."
+        )
+
+    if int(payload.get("scalar_size", -1)) != int(
+        self.scalar_size
+    ):
+        raise RuntimeError(
+            "Replay-buffer scalar features are incompatible."
+        )
+
+    transitions = payload.get("transitions")
+
+    if not isinstance(transitions, list):
+        raise RuntimeError(
+            "Replay-buffer transitions are invalid."
+        )
+
+    self.replay_buffer.extend(
+        transitions[-self.buffer_size:]
+    )
+
+    self.logger.info(
+        "Loaded %d replay transitions from %s.",
+        len(self.replay_buffer),
+        REPLAY_BUFFER_FILE,
+    )
+
+def _save_training_at_exit(self) -> None:
+    """Best-effort save during a normal interpreter shutdown."""
+    try:
+        _save_latest_checkpoint(self)
+        _save_replay_buffer(self)
+        _save_hyperparameters(self)
+    except Exception:
+        self.logger.exception(
+            "Could not save training state during shutdown."
+        )
+
 
 def _advance_and_persist_epsilon(self) -> None:
     """Advance epsilon by one environment step and persist to Hyperparams.prm."""
@@ -222,19 +455,32 @@ def setup_training(self):
     """Initialise training-related objects for the agent."""
 
     _load_hyperparameters(self)
+    training_start_mode = getattr(self, "training_start_mode", "resume",)
 
     self.replay_buffer = deque(maxlen=self.buffer_size)
     self.replay_start_size = min(
         self.buffer_size,
         max(self.min_replay_size, self.batch_size),
     )
+
     self.gradient_steps = 0
     self.round_coins_collected = 0
     self.round_number_kills = 0
-    self.best_score = -1
+
+    # Define safe defaults before checkpoint restoration. In resume mode,
+    # _restore_latest_checkpoint() replaces these values with the saved ones.
+    self.best_score = -1.0
     self.best_score_coins_collected = 0
     self.best_score_enemies_killed = 0
     self.best_score_time_left_after_all_coins = 0
+
+    if training_start_mode != "resume":
+        # Fresh and transfer runs start a new training history.
+        self.epsilon_current = self.epsilon_start
+        self.steps_done = 0
+
+
+
     self.round_time_left_after_all_coins = 0
     self.previous_old_position = None
     self.previous_velocity = (0,0)
@@ -255,7 +501,11 @@ def setup_training(self):
     for param in self.target_net.parameters():
         param.requires_grad = False 
 
-    self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=self.lr) #weight_decay=1e-4)
+    self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=self.lr)
+
+    if training_start_mode == "resume":
+        _restore_latest_checkpoint(self)
+        _load_replay_buffer(self)
 
     self.loss_fn = nn.SmoothL1Loss()
 
@@ -266,14 +516,30 @@ def setup_training(self):
     self.get_epsilon = lambda: get_epsilon_value(self)
     _save_hyperparameters(self)
 
+    self._rounds_since_replay_save = 0
+
+    if not getattr(
+        self,
+        "_training_exit_handler_registered",
+        False,
+    ):
+        atexit.register(_save_training_at_exit, self)
+        self._training_exit_handler_registered = True
+
     
     self.logger.info(
-        "Training initialized: buffer=%d, replay_start=%d, batch=%d, gamma=%.3f, lr=%g",
+        "Training initialized: mode=%s buffer=%d replay=%d "
+        "replay_start=%d batch=%d gamma=%.3f lr=%g "
+        "steps=%d epsilon=%.5f",
+        training_start_mode,
         self.buffer_size,
+        len(self.replay_buffer),
         self.replay_start_size,
         self.batch_size,
         self.gamma,
         self.lr,
+        self.steps_done,
+        self.epsilon_current,
     )
 
 
@@ -720,9 +986,21 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     for _ in range(self.end_of_round_opt_steps):
         optimize_model(self)
 
-    # Save latest policy network to MODEL_FILE; TRAINING_MODEL_FILE is the read-only start checkpoint
-    os.makedirs(os.path.dirname(MODEL_FILE), exist_ok=True)
-    torch.save(self.policy_net.state_dict(), MODEL_FILE)
+
+
+   # Save the complete state required to resume this training task.
+    _save_latest_checkpoint(self)
+
+    self._rounds_since_replay_save += 1
+
+    if self._rounds_since_replay_save >= REPLAY_SAVE_EVERY_ROUNDS:
+        _save_replay_buffer(self)
+        self._rounds_since_replay_save = 0
+
+    torch.save(self.policy_net.state_dict(), BEST_MODEL_FILE)
+
+
+
 
     if self.round_time_left_after_all_coins > 0:
         time_left_fraction = float(self.round_time_left_after_all_coins) / float(max(1, s.MAX_STEPS))

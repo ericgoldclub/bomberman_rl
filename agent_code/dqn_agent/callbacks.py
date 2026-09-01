@@ -16,7 +16,7 @@ LATEST_CHECKPOINT_FILE = os.path.join(AGENT_DIRECTORY, "dqn-latest-checkpoint.pt
 
 BEST_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-best-model.pt")
 
-PRETRAINED_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-pretrained-model.pt")
+PRETRAINED_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "BEST_COIN_COLLECTOR.pt")
 
 REPLAY_BUFFER_FILE = os.path.join(AGENT_DIRECTORY, "dqn-replay-buffer.pkl")
 
@@ -176,6 +176,65 @@ def setup(self):
         if os.path.isfile(BEST_MODEL_FILE):
             load_path = BEST_MODEL_FILE
         elif os.path.isfile(LATEST_CHECKPOINT_FILE):
+            load_path = LATEST_CHECKPOINT_FILE
+        else:
+            load_path = None
+
+    self.logger.info("Model selection: train=%s start_mode=%s load_path=%s exists=%s",
+                     self.train,
+                     self.training_start_mode,
+                     load_path,
+                     bool(load_path and os.path.isfile(load_path)),)
+
+    if load_path and os.path.isfile(load_path):
+        checkpoint = torch.load(load_path, map_location=self.device, weights_only=True)
+
+        # Latest checkpoints contain complete training state. Best and
+        # pretrained files may contain weights only.
+        if (
+        isinstance(checkpoint, dict)
+        and "policy_state_dict" in checkpoint
+        ):
+            policy_state_dict = checkpoint["policy_state_dict"]
+        else:
+            policy_state_dict = checkpoint
+
+        try:
+            self.policy_net.load_state_dict(policy_state_dict)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"Could not load model from {load_path}: {exc}"
+            ) from exc
+
+        if (
+            self.train
+            and self.training_start_mode == "resume"
+            and isinstance(checkpoint, dict)
+            and "policy_state_dict" in checkpoint
+        ):
+            self._resume_checkpoint = checkpoint
+
+        self.logger.info("Loaded DQN model from %s", load_path)
+
+    elif self.train and self.training_start_mode == "transfer":
+        raise FileNotFoundError(
+            f"Transfer model not found: {load_path}. "
+            "Set DQN_PRETRAINED_MODEL to an existing model file."
+        )
+
+    elif self.train and self.training_start_mode == "resume":
+        self.logger.warning(
+            "No latest checkpoint found at %s; starting fresh.",
+            LATEST_CHECKPOINT_FILE,
+        )
+        self.training_start_mode = "fresh"
+
+    elif not self.train:
+        self.logger.warning(
+            "No best or latest model exists; using random weights."
+        )
+
+
             
 
 
