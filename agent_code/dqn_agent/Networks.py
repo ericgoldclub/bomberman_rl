@@ -1,6 +1,52 @@
 import torch
 import torch.nn as nn
+class DQN_v2(nn.Module):
+    def __init__(self, in_channels, grid_size, scalar_size, n_actions):
+        super().__init__()
 
+        self.cnn = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),        # 17x17 -> 8x8, sharp downsample, not blurred
+
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveMaxPool2d((5, 5)),       # keep meaningful resolution, don't collapse to 3x3
+        )
+
+        with torch.no_grad():
+            dummy = torch.zeros(1, in_channels, grid_size[0], grid_size[1])
+            cnn_out_dim = self.cnn(dummy).flatten(1).shape[1]  # 64*5*5 = 1600
+
+        self.scalar_fc = nn.Sequential(
+            nn.Linear(scalar_size, 32), nn.ReLU(),
+            nn.Linear(32, 32), nn.ReLU(),
+        )
+
+        combined_dim = cnn_out_dim + 32
+        self.shared = nn.Sequential(
+            nn.Linear(combined_dim, 256), nn.ReLU(),
+            nn.Linear(256, 128), nn.ReLU(),
+        )
+
+        self.value = nn.Linear(128, 1)
+        self.advantage = nn.Linear(128, n_actions)
+
+    def forward(self, grid, scalar):
+        x = torch.flatten(self.cnn(grid), 1)
+        s = self.scalar_fc(scalar)
+        x = self.shared(torch.cat([x, s], dim=1))
+        value = self.value(x)
+        advantage = self.advantage(x)
+
+        Q = value + advantage - advantage.mean(dim=1, keepdim=True)
+        return Q
+
+    
 class DQN(nn.Module):
     def __init__(
         self,

@@ -11,9 +11,15 @@ from collections import deque
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-saved-model.pt")
 BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-model.pt")
-TRAINING_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-coin-collector.pt")
+PRETRAINED_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-pretrained-model.pt")
+REPLAY_BUFFER_FILE = os.path.join(os.path.dirname(__file__), "dqn-replay-buffer.pkl")
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
-VERBOSE_TRAIN_LOGS = True
+VERBOSE_TRAIN_LOGS = False
+
+# Training defaults to resuming MODEL_FILE. For a one-time transfer-learning
+# start, run with DQN_TRAINING_MODE=transfer and optionally set
+# DQN_PRETRAINED_MODEL=/path/to/model.pt. Use fresh to ignore all checkpoints.
+TRAINING_START_MODES = {"resume", "transfer", "fresh"}
 
 GRID_CHANNELS = 10  # number of channels in the grid input to the DQN
 SCALAR_FEATURES = 8 + len(ACTIONS)  # base scalar features + one-hot last action
@@ -95,6 +101,9 @@ def setup(self):
     self._last_action_index = ACTIONS.index("WAIT")
     self._cached_state_key = None
     self._cached_features = None
+    self._acted_state_key = None
+    self._acted_features = None
+    self._resume_checkpoint = None
 
     from .train import DQN_net
 
@@ -106,32 +115,69 @@ def setup(self):
     ).to(self.device)
 
     if self.train:
-        load_path = TRAINING_MODEL_FILE
+        self.training_start_mode = os.environ.get("DQN_TRAINING_MODE", "resume").lower()
+        if self.training_start_mode not in TRAINING_START_MODES:
+            raise RuntimeError(
+                "DQN_TRAINING_MODE must be one of: "
+                + ", ".join(sorted(TRAINING_START_MODES))
+            )
+
+        if self.training_start_mode == "resume":
+            load_path = MODEL_FILE
+        elif self.training_start_mode == "transfer":
+            load_path = os.environ.get("DQN_PRETRAINED_MODEL", PRETRAINED_MODEL_FILE)
+        else:
+            load_path = None
     elif os.path.isfile(BEST_MODEL_FILE):
+        self.training_start_mode = None
         load_path = BEST_MODEL_FILE
     else:
+        self.training_start_mode = None
         load_path = MODEL_FILE
 
     self.logger.info(
-        "Model selection mode=%s path=%s exists=%s",
-        "train" if self.train else "eval",
+        "Model selection mode=%s training_start=%s path=%s exists=%s",
+        "train" if self.train else "eval", self.training_start_mode,
         load_path,
-        os.path.isfile(load_path),
+        bool(load_path and os.path.isfile(load_path)),
     )
 
-    if os.path.isfile(load_path):
-        checkpoint = torch.load(load_path, map_location=self.device,)
+    if load_path and os.path.isfile(load_path):
+        checkpoint = torch.load(load_path, map_location=self.device, weights_only=True)
+        if isinstance(checkpoint, dict) and "policy_state_dict" in checkpoint:
+            policy_state_dict = checkpoint["policy_state_dict"]
+        else:
+            # Backward compatibility with existing weights-only model files.
+            policy_state_dict = checkpoint
         try:
-            self.policy_net.load_state_dict(checkpoint)
+            self.policy_net.load_state_dict(policy_state_dict)
+            if (
+                self.train
+                and self.training_start_mode == "resume"
+                and isinstance(checkpoint, dict)
+                and "policy_state_dict" in checkpoint
+            ):
+                self._resume_checkpoint = checkpoint
             self.logger.info("Loaded DQN model from %s", load_path)
         except RuntimeError as exc:
-            self.logger.warning(
-                "Could not load model from %s due to architecture mismatch (%s). Using freshly initialized network.",
-                load_path,
-                exc,
-            )
+            raise RuntimeError(
+                f"Could not load model from {load_path} due to architecture mismatch: {exc}"
+            ) from exc
 
-    else:
+    elif self.train and self.training_start_mode == "transfer":
+        raise FileNotFoundError(
+            f"Transfer-learning model not found: {load_path}. Set DQN_PRETRAINED_MODEL "
+            "to the model you want to use or place it at PRETRAINED_MODEL_FILE."
+        )
+
+    elif self.train and self.training_start_mode == "resume":
+        self.logger.warning(
+            "No latest training checkpoint at %s; starting a fresh training run.",
+            load_path,
+        )
+        self.training_start_mode = "fresh"
+
+    elif load_path:
         self.logger.warning(
             "No saved DQN model found; using freshly initialized policy network."
         )
@@ -478,6 +524,37 @@ def state_to_features_cached(self, game_state: dict):
     return cached
 
 
+def _acted_state_key(game_state: dict | None):
+    """Identify the state for which the policy most recently chose an action."""
+    if game_state is None:
+        return None
+
+    self_state = game_state.get("self")
+    self_pos = self_state[-1] if self_state is not None else None
+    return game_state.get("round"), game_state.get("step"), self_pos
+
+
+def features_used_for_action(self, game_state: dict):
+    """Return the exact features on which the action for game_state was based.
+
+    Recomputing these features after ``act`` is incorrect because ``act`` has
+    already advanced ``_last_action_index`` to the selected action. That would
+    put the selected action into the old-state input stored in replay.
+    """
+    if (
+        getattr(self, "_acted_state_key", None) == _acted_state_key(game_state)
+        and getattr(self, "_acted_features", None) is not None
+    ):
+        return self._acted_features
+
+    self.logger.warning(
+        "No recorded policy features for round=%s step=%s; recomputing old-state features.",
+        game_state.get("round") if game_state is not None else None,
+        game_state.get("step") if game_state is not None else None,
+    )
+    return state_to_features_cached(self, game_state)
+
+
 
 def act(self, game_state: dict) -> str:
 
@@ -487,6 +564,12 @@ def act(self, game_state: dict) -> str:
         return 'WAIT'
 
     grid, scalar = feats
+
+    # Keep the exact representation seen by the behavior policy. Training is
+    # called after this method has updated _last_action_index, so recomputing
+    # the old state there would leak the selected action into its input.
+    self._acted_state_key = _acted_state_key(game_state)
+    self._acted_features = feats
 
     field = game_state["field"]
     explosion_map = game_state.get('explosion_map', np.zeros_like(field))
@@ -500,9 +583,16 @@ def act(self, game_state: dict) -> str:
         grid_t = torch.from_numpy(grid).unsqueeze(0).to(self.device)  # shape (1, C, H, W)
         scalar_t = torch.from_numpy(scalar).unsqueeze(0).to(self.device)  # shape (1, S)
 
-        epsilon = self.get_epsilon() if self.train and hasattr(self, "get_epsilon") else 0.0
+        evaluation_round = bool(
+            self.train and getattr(self, "_evaluation_round", False)
+        )
+        epsilon = (
+            self.get_epsilon()
+            if self.train and not evaluation_round and hasattr(self, "get_epsilon")
+            else 0.0
+        )
 
-        if self.train and random.random() < epsilon:
+        if self.train and not evaluation_round and random.random() < epsilon:
             valid_actions = [a for a, allowed in zip(ACTIONS, _policy_action_mask(game_state)) if allowed]
             if not valid_actions:
                 chosen_action = 'WAIT'
