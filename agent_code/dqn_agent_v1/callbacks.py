@@ -14,7 +14,7 @@ AGENT_DIRECTORY = os.path.dirname(__file__)
 
 LATEST_CHECKPOINT_FILE = os.path.join(AGENT_DIRECTORY, "dqn-latest-checkpoint.pt")
 
-BEST_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-best-model.pt")
+BEST_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-bestcoincollector.pt")
 
 PRETRAINED_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "BEST_COIN_COLLECTOR.pt")
 
