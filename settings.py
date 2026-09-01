@@ -36,7 +36,7 @@ MAX_AGENTS = 4
 DEFAULT_TRAINING_GAMES = 50_000
 
 # Round properties
-MAX_STEPS = 200
+MAX_STEPS = 400
 
 # GUI properties
 GRID_SIZE = 30
