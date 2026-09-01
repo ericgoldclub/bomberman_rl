@@ -12,13 +12,13 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 AGENT_DIRECTORY = os.path.dirname(__file__)
 
-LATEST_CHECKPOINT_FILE = os.path.join(AGENT_DIRECTORY, "dqn-latest-checkpoint.pt")
+LATEST_CHECKPOINT_FILE = os.path.join(AGENT_DIRECTORY, "dqn-crate-latest-checkpoint.pt")
 
-BEST_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-best-model.pt")
+BEST_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-best-crate-burster.pt")
 
-PRETRAINED_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "BEST_COIN_COLLECTOR.pt")
+PRETRAINED_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-best-coin-collector.pt")
 
-REPLAY_BUFFER_FILE = os.path.join(AGENT_DIRECTORY, "dqn-replay-buffer.pkl")
+REPLAY_BUFFER_FILE = os.path.join(AGENT_DIRECTORY, "dqn-crate-replay-buffer.pkl")
 
 TRAINING_START_MODES = {"fresh", "resume", "transfer"}
 

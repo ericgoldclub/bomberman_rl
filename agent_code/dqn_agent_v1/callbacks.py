@@ -14,9 +14,9 @@ AGENT_DIRECTORY = os.path.dirname(__file__)
 
 LATEST_CHECKPOINT_FILE = os.path.join(AGENT_DIRECTORY, "dqn-latest-checkpoint.pt")
 
-BEST_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-bestcoincollector.pt")
+BEST_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-best-model.pt")
 
-PRETRAINED_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "BEST_COIN_COLLECTOR.pt")
+PRETRAINED_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-best-coin-collector.pt")
 
 REPLAY_BUFFER_FILE = os.path.join(AGENT_DIRECTORY, "dqn-replay-buffer.pkl")
 
