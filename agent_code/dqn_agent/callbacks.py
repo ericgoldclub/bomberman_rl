@@ -9,9 +9,19 @@ from collections import deque
 
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
-MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-saved-model.pt")
-BEST_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-model.pt")
-TRAINING_MODEL_FILE = os.path.join(os.path.dirname(__file__), "dqn-best-coin-collector.pt")
+
+AGENT_DIRECTORY = os.path.dirname(__file__)
+
+LATEST_CHECKPOINT_FILE = os.path.join(AGENT_DIRECTORY, "dqn-latest-checkpoint.pt")
+
+BEST_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-best-model.pt")
+
+PRETRAINED_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-pretrained-model.pt")
+
+REPLAY_BUFFER_FILE = os.path.join(AGENT_DIRECTORY, "dqn-replay-buffer.pkl")
+
+TRAINING_START_MODES = {"fresh", "resume", "transfer"}
+
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
 VERBOSE_TRAIN_LOGS = True
 
@@ -95,6 +105,8 @@ def setup(self):
     self._last_action_index = ACTIONS.index("WAIT")
     self._cached_state_key = None
     self._cached_features = None
+    self._acted_state_key = None
+    self._acted_features = None
 
     from .train import DQN_net
 
@@ -105,6 +117,7 @@ def setup(self):
         n_actions=len(ACTIONS),
     ).to(self.device)
 
+    """
     if self.train:
         load_path = TRAINING_MODEL_FILE
     elif os.path.isfile(BEST_MODEL_FILE):
@@ -135,6 +148,37 @@ def setup(self):
         self.logger.warning(
             "No saved DQN model found; using freshly initialized policy network."
         )
+
+    """
+
+    self._resume_checkpoint = None
+
+    if self.train:
+        # Determine the training start mode based on the environment variable.
+        self.training_start_mode = os.environ.get("DQN_TRAINING_MODE","resume",).strip().lower() 
+        
+
+        if self.training_start_mode not in TRAINING_START_MODES:
+            raise RuntimeError("DQN_TRAINING_MODE must be one of: " + ", ".join(sorted(TRAINING_START_MODES)))
+
+        if self.training_start_mode == "resume":
+            load_path = LATEST_CHECKPOINT_FILE
+
+        elif self.training_start_mode == "transfer":
+            load_path = os.environ.get("DQN_PRETRAINED_MODEL", PRETRAINED_MODEL_FILE)
+
+        else:
+            # Fresh training loads no model
+            load_path = None
+    else:
+        self.training_start_mode = None
+
+        if os.path.isfile(BEST_MODEL_FILE):
+            load_path = BEST_MODEL_FILE
+        elif os.path.isfile(LATEST_CHECKPOINT_FILE):
+            
+
+
 
     self.policy_net.eval()
 
@@ -477,6 +521,40 @@ def state_to_features_cached(self, game_state: dict):
     self._cached_features = cached
     return cached
 
+def _game_state_key(game_state: dict | None):
+    """Identify a state across act() and the subsequent training callback."""
+    if game_state is None:
+        return None
+
+    self_state = game_state.get("self")
+    self_position = self_state[-1] if self_state is not None else None
+
+    return (
+        game_state.get("round"),
+        game_state.get("step"),
+        self_position,
+    )
+
+
+def features_used_for_action(self, game_state: dict):
+    """Return the exact features that act() used for this state."""
+    if game_state is None:
+        return None
+
+    if (
+        getattr(self, "_acted_state_key", None) == _game_state_key(game_state)
+        and getattr(self, "_acted_features", None) is not None
+    ):
+        return self._acted_features
+
+    # This should only occur if act() was not called for this state.
+    self.logger.warning(
+        "No saved action features for round=%s step=%s; recomputing features.",
+        game_state.get("round"),
+        game_state.get("step"),
+    )
+    return state_to_features_cached(self, game_state)
+
 
 
 def act(self, game_state: dict) -> str:
@@ -485,6 +563,9 @@ def act(self, game_state: dict) -> str:
     if feats is None:
         self.logger.debug("Game state is None, returning WAIT")
         return 'WAIT'
+
+    self._acted_state_key = _game_state_key(game_state)
+    self._acted_features = feats
 
     grid, scalar = feats
 

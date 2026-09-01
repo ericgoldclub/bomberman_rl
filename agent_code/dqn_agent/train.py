@@ -11,7 +11,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from .callbacks import ACTIONS, state_to_features_cached, MODEL_FILE, BEST_MODEL_FILE, TRAINING_MODEL_FILE, _feature_dimensions, _is_valid_action, _policy_action_mask
+from .callbacks import (
+    ACTIONS,
+    state_to_features_cached,
+    features_used_for_action,
+    MODEL_FILE,
+    BEST_MODEL_FILE,
+    TRAINING_MODEL_FILE,
+    _feature_dimensions,
+    _is_valid_action,
+    _policy_action_mask,
+)
+
 import events as e
 import settings as s
 
@@ -63,6 +74,20 @@ ALL_COINS_CLEAR_BONUS = 5.0 # bonus reward for clearing all coins
 POST_CLEAR_TIME_LEFT_WEIGHT = 1.0 # rewarding the time till end of game after all coins are cleared
 STEP_TIME_COST = 0.05 # penalty for each step to encourage faster completion of objectives
 
+def _transition_key(game_state: dict | None, action: str):
+    """Identify the environment action represented by a replay transition."""
+    if game_state is None:
+        return None
+
+    self_state = game_state.get("self")
+    self_position = self_state[-1] if self_state is not None else None
+
+    return (
+        game_state.get("round"),
+        game_state.get("step"),
+        self_position,
+        ACTION_TO_INDEX.get(action, ACTION_TO_INDEX["WAIT"]),
+    )
 
 def _pack_feature_array(arr: np.ndarray | None, dtype: np.dtype) -> np.ndarray | None:
     if arr is None:
@@ -216,6 +241,8 @@ def setup_training(self):
     self.position_history = deque(maxlen=4)
     self._last_action_index = ACTION_TO_INDEX["WAIT"]
 
+    self._pending_transition_key = None
+
 
     if not hasattr(self, "policy_net"):
         raise RuntimeError("policy_net must be initialized in setup() before calling setup_training()")
@@ -254,10 +281,20 @@ def optimize_model(self):
 
     '''Perform double DQN optimization step on a batch of transitions from the replay buffer.'''
 
-    if len(self.replay_buffer) < self.replay_start_size:
+    replay_population = list(self.replay_buffer)
+
+    # The latest transition remains in the replay buffer to ensure it is not lost or end_of_round() marks it terminal
+
+    if self._pending_transition_key is not None and replay_population:
+        replay_population.pop()
+
+    if len(replay_population) < self.replay_start_size:
         return None
 
-    batch = random.sample(self.replay_buffer, self.batch_size)
+    batch = random.sample(replay_population, self.batch_size)
+
+
+
 
     states_grid_np = np.stack(
         [transition.grid for transition in batch],
@@ -583,7 +620,7 @@ def game_events_occurred(
     # Convert states into neural-network features
     # ------------------------------------------------------------
 
-    old_feats = state_to_features_cached(self, old_game_state)
+    old_feats = features_used_for_action(self, old_game_state)
     self._last_action_index = ACTION_TO_INDEX.get(self_action, ACTION_TO_INDEX["WAIT"])
     new_feats = state_to_features_cached(self, new_game_state)
 
@@ -616,6 +653,8 @@ def game_events_occurred(
             )
         )
 
+        self._pending_transition_key = _transition_key(old_game_state, self_action)
+
         # --------------------------------------------------------
         # Training
         # --------------------------------------------------------
@@ -628,35 +667,54 @@ def game_events_occurred(
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
+
+    last_state = features_used_for_action(self, last_game_state)
     self._last_action_index = ACTION_TO_INDEX.get(last_action, ACTION_TO_INDEX["WAIT"])
-    last_state = state_to_features_cached(self, last_game_state)
-    reward = reward_from_events(self, events)
+
+    terminal_key = _transition_key(last_game_state, last_action)
     current_score = _round_objective_score(self)
 
-    # Keep terminal bonus aligned with the exact best-model objective.
-    terminal_bonus = current_score * TERMINAL_OBJECTIVE_ALIGNMENT_WEIGHT
+    terminal_already_stored = (
+        self._pending_transition_key == terminal_key
+        and bool(self.replay_buffer)
+    )
 
-    reward += terminal_bonus
-    if getattr(self, "log_dqn_details", False):
-        self.logger.info(
-            "End of round: objective_score=%.3f terminal_bonus=%.3f total_terminal_reward=%.3f",
-            current_score, terminal_bonus, reward,
+    if terminal_already_stored:
+        # A surviving agent's final action was already stored by
+        # game_events_occurred(). Preserve its immediate reward and only
+        # remove the next state so the terminal target cannot bootstrap.
+        transition = self.replay_buffer[-1]
+        self.replay_buffer[-1] = transition._replace(
+            next_grid=None,
+            next_scalar=None,
+            next_action_mask=None,
         )
+    else:
+        # Dead agents do not receive game_events_occurred() for the fatal
+        # action, so their final transition must be created here.
+        reward = reward_from_events(self, events)
 
-    # terminal state: next_state is None
-    if last_state is not None:
-        last_grid, last_scalar = last_state
-        self.replay_buffer.append(
-            Transition(
-                _pack_normalized_feature_array(last_grid),
-                _pack_normalized_feature_array(last_scalar),
-                ACTION_TO_INDEX.get(last_action, ACTION_TO_INDEX["WAIT"]),
-                None,
-                None,
-                None,
-                reward,
+        if last_state is not None:
+            last_grid, last_scalar = last_state
+            self.replay_buffer.append(
+                Transition(
+                    _pack_normalized_feature_array(last_grid),
+                    _pack_normalized_feature_array(last_scalar),
+                    ACTION_TO_INDEX.get(last_action, ACTION_TO_INDEX["WAIT"]),
+                    None,
+                    None,
+                    None,
+                    reward,
+                )
             )
-        )
+
+            # This action was not counted in game_events_occurred().
+            self.steps_done += 1
+            _advance_and_persist_epsilon(self)
+
+    # The final transition is now complete and can be sampled by the
+    # end-of-round optimization passes.
+    self._pending_transition_key = None
 
     # Do some final optimization passes
     for _ in range(self.end_of_round_opt_steps):
