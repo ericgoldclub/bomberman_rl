@@ -11,7 +11,7 @@ def get_eps(n_games, tau):
     return eps_min + (eps_max - eps_min) * np.exp(-1.0 * steps / tau)
 
 def get_tau(hours, eps_end):
-    n_games = hours * 60 * 60 / (avg_game_time * steps_per_game)
+    n_games = hours * 60 * 60 / (avg_game_time)
     steps = n_games * 400
     val = (eps_max - eps_min) / (eps_end - eps_min)
 
