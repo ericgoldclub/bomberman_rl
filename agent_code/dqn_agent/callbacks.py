@@ -640,8 +640,13 @@ def act(self, game_state: dict) -> str:
         grid_t = torch.from_numpy(grid).unsqueeze(0).to(self.device)  # shape (1, C, H, W)
         scalar_t = torch.from_numpy(scalar).unsqueeze(0).to(self.device)  # shape (1, S)
 
-        epsilon = self.get_epsilon() if self.train and hasattr(self, "get_epsilon") else 0.0
-
+        if getattr(self, "_evaluation_round", False):
+            epsilon = 0.0
+        elif self.train and hasattr(self, "get_epsilon"):
+            epsilon = self.get_epsilon()
+        else:
+            epsilon = 0.0
+            
         if self.train and random.random() < epsilon:
             valid_actions = [a for a, allowed in zip(ACTIONS, _policy_action_mask(game_state)) if allowed]
             if not valid_actions:

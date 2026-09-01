@@ -46,6 +46,8 @@ REQUIRED_HYPERPARAMETER_KEYS = (
     "EPSILON_START",
     "EPSILON_END",
     "EPSILON_HALF_LIFE",
+    "EVAL_EVERY_TRAINING_ROUNDS",
+    "EVAL_ROUNDS",
 )
 
 HYPERPARAMS_FILE = os.path.join(os.path.dirname(__file__), "Hyperparams.prm")
@@ -54,6 +56,9 @@ CHECKPOINT_VERSION = 1
 REPLAY_BUFFER_VERSION = 1
 REPLAY_SAVE_EVERY_ROUNDS = 100
 
+BEST_MODEL_METRIC_VERSION = 1
+FEATURE_VERSION = 1
+REWARD_VERSION = 1
 
 
 from .Networks import DQN_prev as DQN_net
@@ -77,8 +82,7 @@ SHAPING_REWARDS = {
 
 TERMINAL_OBJECTIVE_ALIGNMENT_WEIGHT = 0.1 # multiplying the current score to shape the reward
 ALL_COINS_CLEAR_BONUS = 5.0 # bonus reward for clearing all coins
-POST_CLEAR_TIME_LEFT_WEIGHT = 1.0 # rewarding the time till end of game after all coins are cleared
-STEP_TIME_COST = 0.05 # penalty for each step to encourage faster completion of objectives
+STEP_TIME_COST = 0.005 # penalty for each step to encourage faster completion of objectives
 
 def _transition_key(game_state: dict | None, action: str):
     """Identify the environment action represented by a replay transition."""
@@ -150,6 +154,10 @@ def _load_hyperparameters(self) -> None:
     self.epsilon_start = float(parsed["EPSILON_START"])
     self.epsilon_end = float(parsed["EPSILON_END"])
     self.tau = float(parsed["EPSILON_HALF_LIFE"])
+
+    self.eval_every_training_rounds = int(parsed["EVAL_EVERY_TRAINING_ROUNDS"])
+    self.eval_rounds = int(parsed["EVAL_ROUNDS"])
+
     self.epsilon_current = float(
         np.clip(
             parsed.get("EPSILON_LAST", self.epsilon_start),
@@ -169,6 +177,13 @@ def _load_hyperparameters(self) -> None:
         raise RuntimeError(
             f"BATCH_SIZE ({self.batch_size}) must not exceed BUFFER_SIZE ({self.buffer_size})."
         )
+    if self.eval_every_training_rounds <= 0:
+        raise RuntimeError(
+            "EVAL_EVERY_TRAINING_ROUNDS must be > 0."
+        )
+
+    if self.eval_rounds <= 0:
+        raise RuntimeError("EVAL_ROUNDS must be > 0.")
 
 
 def _save_hyperparameters(self) -> None:
@@ -180,6 +195,9 @@ def _save_hyperparameters(self) -> None:
         "BEST_MODEL_COINS_COLLECTED": f"{int(self.best_score_coins_collected)}",
         "BEST_MODEL_ENEMIES_KILLED": f"{int(self.best_score_enemies_killed)}",
         "BEST_MODEL_TIME_LEFT_AFTER_ALL_COINS": f"{int(self.best_score_time_left_after_all_coins)}",
+        "BEST_MODEL_COMPLETION_RATE": (f"{self.best_completion_rate:.5f}"),
+        "BEST_MODEL_MEAN_TIME_LEFT": (f"{self.best_mean_time_left:.5f}"),
+        "BEST_MODEL_METRIC_VERSION": (str(BEST_MODEL_METRIC_VERSION)),
     }
 
     lines: list[str] = []
@@ -240,6 +258,28 @@ def _save_latest_checkpoint(self) -> None:
         "grid_channels": int(self.grid_channels),
         "scalar_size": int(self.scalar_size),
         "actions": tuple(ACTIONS),
+        "best_completion_rate": float(
+            self.best_completion_rate
+        ),
+        "best_mean_time_left": float(
+            self.best_mean_time_left
+        ),
+        "evaluation_round": bool(
+            self._evaluation_round
+        ),
+        "evaluation_rounds_remaining": int(
+            self._evaluation_rounds_remaining
+        ),
+        "evaluation_results": list(
+            self._evaluation_results
+        ),
+        "training_rounds_since_evaluation": int(
+            self._training_rounds_since_evaluation
+        ),
+        "best_model_metric_version": (
+            BEST_MODEL_METRIC_VERSION
+        ),
+
     }
 
     _atomic_torch_save(
@@ -303,18 +343,83 @@ def _restore_latest_checkpoint(self) -> None:
         )
     )
 
-    self.best_score = float(
-    checkpoint.get("best_score", -1.0)
-)
-    self.best_score_coins_collected = int(
-        checkpoint.get("best_score_coins_collected", 0)
+    stored_metric_version = checkpoint.get(
+        "best_model_metric_version"
     )
-    self.best_score_enemies_killed = int(
-        checkpoint.get("best_score_enemies_killed", 0)
+
+    if (
+        stored_metric_version
+        == BEST_MODEL_METRIC_VERSION
+    ):
+        self.best_score = float(
+            checkpoint.get("best_score", -1.0)
+        )
+        self.best_score_coins_collected = int(
+            checkpoint.get(
+                "best_score_coins_collected",
+                0,
+            )
+        )
+        self.best_score_enemies_killed = int(
+            checkpoint.get(
+                "best_score_enemies_killed",
+                0,
+            )
+        )
+        self.best_score_time_left_after_all_coins = int(
+            checkpoint.get(
+                "best_score_time_left_after_all_coins",
+                0,
+            )
+        )
+        self.best_completion_rate = float(
+            checkpoint.get(
+                "best_completion_rate",
+                0.0,
+            )
+        )
+        self.best_mean_time_left = float(
+            checkpoint.get(
+                "best_mean_time_left",
+                0.0,
+            )
+        )
+
+    else:
+        # Do not compare results produced by different definitions of "best".
+        self.logger.warning(
+            "Resetting best-model metric: "
+            "checkpoint version=%s current version=%s.",
+            stored_metric_version,
+            BEST_MODEL_METRIC_VERSION,
+        )
+
+        self.best_score = -1.0
+        self.best_score_coins_collected = 0
+        self.best_score_enemies_killed = 0
+        self.best_score_time_left_after_all_coins = 0
+        self.best_completion_rate = 0.0
+        self.best_mean_time_left = 0.0
+
+
+
+
+
+    self._evaluation_round = bool(
+        checkpoint.get("evaluation_round", False)
     )
-    self.best_score_time_left_after_all_coins = int(
+    self._evaluation_rounds_remaining = int(
         checkpoint.get(
-            "best_score_time_left_after_all_coins",
+            "evaluation_rounds_remaining",
+            0,
+        )
+    )
+    self._evaluation_results = list(
+        checkpoint.get("evaluation_results", [])
+    )
+    self._training_rounds_since_evaluation = int(
+        checkpoint.get(
+            "training_rounds_since_evaluation",
             0,
         )
     )
@@ -328,10 +433,13 @@ def _save_replay_buffer(self) -> None:
 
     payload = {
         "replay_version": REPLAY_BUFFER_VERSION,
+        "feature_version": FEATURE_VERSION,
+        "reward_version": REWARD_VERSION,
         "capacity": int(self.buffer_size),
         "grid_channels": int(self.grid_channels),
         "scalar_size": int(self.scalar_size),
         "actions": tuple(ACTIONS),
+        "steps_done": int(self.steps_done),
         "transitions": transitions,
     }
 
@@ -384,6 +492,25 @@ def _load_replay_buffer(self) -> None:
             "Unsupported replay-buffer version: "
             f"{payload.get('replay_version')}"
         )
+    if (
+        payload.get("feature_version")
+        != FEATURE_VERSION
+    ):
+        raise RuntimeError(
+            "Replay-buffer feature version is incompatible: "
+            f"stored={payload.get('feature_version')} "
+            f"current={FEATURE_VERSION}."
+        )
+
+    if (
+        payload.get("reward_version")
+        != REWARD_VERSION
+    ):
+        raise RuntimeError(
+            "Replay-buffer reward version is incompatible: "
+            f"stored={payload.get('reward_version')} "
+            f"current={REWARD_VERSION}."
+        )
 
     if tuple(payload.get("actions", ())) != tuple(ACTIONS):
         raise RuntimeError(
@@ -415,6 +542,19 @@ def _load_replay_buffer(self) -> None:
         transitions[-self.buffer_size:]
     )
 
+    replay_steps_done = int(payload.get("steps_done", 0))
+
+    step_difference = abs( int(self.steps_done) - replay_steps_done)
+
+    if step_difference > self.buffer_size:
+        self.logger.warning(
+            "Checkpoint and replay differ by %d environment steps "
+            "(checkpoint=%d replay=%d).",
+            step_difference,
+            self.steps_done,
+            replay_steps_done,
+        )
+
     self.logger.info(
         "Loaded %d replay transitions from %s.",
         len(self.replay_buffer),
@@ -432,24 +572,104 @@ def _save_training_at_exit(self) -> None:
             "Could not save training state during shutdown."
         )
 
+def _advance_epsilon(self) -> None:
+    """Advance epsilon in memory by one environment step."""
+    decay_factor = float(np.exp(-np.log(2.0) / self.tau) )
 
-def _advance_and_persist_epsilon(self) -> None:
-    """Advance epsilon by one environment step and persist to Hyperparams.prm."""
-    decay_factor = float(np.exp(-np.log(2.0) / self.tau))
-    self.epsilon_current = float(
-        self.epsilon_end + (self.epsilon_current - self.epsilon_end) * decay_factor
+    self.epsilon_current = float(self.epsilon_end + (self.epsilon_current - self.epsilon_end)* decay_factor)
+
+def _complete_evaluation_block(self) -> None:
+    """Evaluate the candidate policy over the completed greedy rounds."""
+    if not self._evaluation_results:
+        raise RuntimeError(
+            "Cannot complete an empty evaluation block."
+        )
+
+    game_scores = np.asarray(
+        [
+            result["game_score"]
+            for result in self._evaluation_results
+        ],
+        dtype=np.float64,
     )
-    _save_hyperparameters(self)
 
-
-def _round_objective_score(self) -> float:
-    """Primary round objective shared by training bonus and checkpoint selection."""
-    time_left_fraction = float(self.round_time_left_after_all_coins) / float(max(1, s.MAX_STEPS))
-    return float(
-        self.round_coins_collected
-        + self.round_number_kills * 5
-        + POST_CLEAR_TIME_LEFT_WEIGHT * time_left_fraction
+    completions = np.asarray(
+        [
+            result["completed"]
+            for result in self._evaluation_results
+        ],
+        dtype=np.float64,
     )
+
+    completed_times = [
+        result["time_left"]
+        for result in self._evaluation_results
+        if result["completed"]
+    ]
+
+    mean_game_score = float(np.mean(game_scores))
+    completion_rate = float(np.mean(completions))
+
+    if completed_times:
+        mean_time_left = float(
+            np.mean(completed_times)
+        )
+    else:
+        mean_time_left = 0.0
+
+    candidate_metric = (
+        mean_game_score,
+        completion_rate,
+        mean_time_left,
+    )
+
+    best_metric = (
+        float(self.best_score),
+        float(self.best_completion_rate),
+        float(self.best_mean_time_left),
+    )
+
+    self.logger.info(
+        "Greedy evaluation completed: "
+        "mean_game_score=%.3f completion_rate=%.3f "
+        "mean_time_left=%.1f over %d rounds.",
+        mean_game_score,
+        completion_rate,
+        mean_time_left,
+        len(self._evaluation_results),
+    )
+
+    if candidate_metric > best_metric:
+        self.best_score = mean_game_score
+        self.best_completion_rate = completion_rate
+        self.best_mean_time_left = mean_time_left
+
+        # These legacy fields remain available for logging and
+        # Hyperparams.prm compatibility.
+        self.best_score_coins_collected = int(
+            round(mean_game_score)
+        )
+        self.best_score_time_left_after_all_coins = int(
+            round(mean_time_left)
+        )
+
+        _atomic_torch_save(
+            self.policy_net.state_dict(),
+            BEST_MODEL_FILE,
+        )
+
+        self.logger.info(
+            "Saved new best model: metric=%s.",
+            candidate_metric,
+        )
+
+    else:
+        self.logger.info(
+            "Candidate did not improve best metric %s.",
+            best_metric,
+        )
+
+    self._evaluation_results = []
 
 def setup_training(self):
     """Initialise training-related objects for the agent."""
@@ -466,6 +686,8 @@ def setup_training(self):
     self.gradient_steps = 0
     self.round_coins_collected = 0
     self.round_number_kills = 0
+    self.round_game_score = 0.0
+    self.round_all_coins_collected = False
 
     # Define safe defaults before checkpoint restoration. In resume mode,
     # _restore_latest_checkpoint() replaces these values with the saved ones.
@@ -488,6 +710,14 @@ def setup_training(self):
     self._last_action_index = ACTION_TO_INDEX["WAIT"]
 
     self._pending_transition_key = None
+
+    self._evaluation_round = False
+    self._evaluation_rounds_remaining = 0
+    self._evaluation_results = []
+    self._training_rounds_since_evaluation = 0
+
+    self.best_completion_rate = 0.0
+    self.best_mean_time_left = 0.0
 
 
     if not hasattr(self, "policy_net"):
@@ -788,6 +1018,9 @@ def game_events_occurred(
 
     events = list(events)
 
+    if new_game_state is not None:
+        self.round_game_score = float(new_game_state["self"][1])
+
     # ------------------------------------------------------------
     # Bookkeeping
     # ------------------------------------------------------------
@@ -872,19 +1105,30 @@ def game_events_occurred(
 
         if old_coins > 0 and new_coins == 0:
             time_left = max(0, int(s.MAX_STEPS) - int(new_game_state.get("step", 0)))
+            self.round_all_coins_collected = True
             self.round_time_left_after_all_coins = time_left
-            reward += ALL_COINS_CLEAR_BONUS
+
+            time_left_fraction = float(time_left) / float(max(1, s.MAX_STEPS))
+
+            reward += (ALL_COINS_CLEAR_BONUS + time_left_fraction)
 
             if getattr(self, "log_dqn_details", False):
                 self.logger.info(
-                    "All coins collected: completion bonus +%.2f (%d steps left)",
+                    "All coins collected: completion bonus +%.2f, "
+                    "time bonus +%.3f (%d steps left)",
                     ALL_COINS_CLEAR_BONUS,
+                    time_left_fraction,
                     time_left,
                 )
 
     # ------------------------------------------------------------
     # Convert states into neural-network features
     # ------------------------------------------------------------
+
+    if self._evaluation_round:
+        # Evaluation measures the frozen greedy policy. It must not alter
+        # replay, epsilon, the optimizer, or the target network.
+        return
 
     old_feats = features_used_for_action(self, old_game_state)
     self._last_action_index = ACTION_TO_INDEX.get(self_action, ACTION_TO_INDEX["WAIT"])
@@ -926,19 +1170,89 @@ def game_events_occurred(
         # --------------------------------------------------------
 
         self.steps_done += 1
-        _advance_and_persist_epsilon(self)
+        _advance_epsilon(self)
 
         if self.steps_done % self.train_every_steps == 0:
             optimize_model(self)
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
+    if self._evaluation_round:
+        events = list(events)
+
+        # Dead agents do not receive game_events_occurred() for their
+        # fatal action. Account for game-score events from that action.
+        died_on_final_action = (
+            e.GOT_KILLED in events
+            or e.KILLED_SELF in events
+        )
+
+        if died_on_final_action and last_game_state is not None:
+            score_before_final_action = float(
+                last_game_state["self"][1]
+            )
+
+            final_score_delta = (
+                events.count(e.COIN_COLLECTED)
+                * float(s.REWARD_COIN)
+                + events.count(e.KILLED_OPPONENT)
+                * float(s.REWARD_KILL)
+            )
+
+            self.round_game_score = (
+                score_before_final_action
+                + final_score_delta
+            )
+
+        self._evaluation_results.append(
+            {
+                "game_score": float(
+                    self.round_game_score
+                ),
+                "completed": bool(
+                    self.round_all_coins_collected
+                ),
+                "time_left": int(
+                    self.round_time_left_after_all_coins
+                ),
+            }
+        )
+
+        self._evaluation_rounds_remaining -= 1
+
+        self.logger.info(
+            "Evaluation round finished: score=%.1f "
+            "completed=%s time_left=%d remaining=%d.",
+            self.round_game_score,
+            self.round_all_coins_collected,
+            self.round_time_left_after_all_coins,
+            self._evaluation_rounds_remaining,
+        )
+
+        if self._evaluation_rounds_remaining <= 0:
+            _complete_evaluation_block(self)
+            self._evaluation_round = False
+            self._training_rounds_since_evaluation = 0
+
+        self.round_game_score = 0.0
+        self.round_coins_collected = 0
+        self.round_number_kills = 0
+        self.round_time_left_after_all_coins = 0
+        self.round_all_coins_collected = False
+        self.previous_old_position = None
+        self.previous_velocity = (0, 0)
+        self.position_history.clear()
+        self._pending_transition_key = None
+
+        _save_latest_checkpoint(self)
+        _save_hyperparameters(self)
+        return
 
     last_state = features_used_for_action(self, last_game_state)
     self._last_action_index = ACTION_TO_INDEX.get(last_action, ACTION_TO_INDEX["WAIT"])
 
     terminal_key = _transition_key(last_game_state, last_action)
-    current_score = _round_objective_score(self)
+
 
     terminal_already_stored = (
         self._pending_transition_key == terminal_key
@@ -976,7 +1290,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
             # This action was not counted in game_events_occurred().
             self.steps_done += 1
-            _advance_and_persist_epsilon(self)
+            _advance_epsilon(self)
 
     # The final transition is now complete and can be sampled by the
     # end-of-round optimization passes.
@@ -987,44 +1301,63 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         optimize_model(self)
 
 
+    self._training_rounds_since_evaluation += 1
 
-   # Save the complete state required to resume this training task.
+    if (
+        self._training_rounds_since_evaluation
+        >= self.eval_every_training_rounds
+    ):
+        self._evaluation_round = True
+        self._evaluation_rounds_remaining = (
+            self.eval_rounds
+        )
+        self._evaluation_results = []
+
+        self.logger.info(
+            "Starting %d greedy evaluation rounds "
+            "after %d training rounds.",
+            self.eval_rounds,
+            self._training_rounds_since_evaluation,
+        )
+
+
+    # Save the complete state required to resume this training task.
     _save_latest_checkpoint(self)
 
     self._rounds_since_replay_save += 1
 
-    if self._rounds_since_replay_save >= REPLAY_SAVE_EVERY_ROUNDS:
+    if (
+        self._rounds_since_replay_save
+        >= REPLAY_SAVE_EVERY_ROUNDS
+    ):
         _save_replay_buffer(self)
         self._rounds_since_replay_save = 0
 
-    torch.save(self.policy_net.state_dict(), BEST_MODEL_FILE)
-
-
-
-
     if self.round_time_left_after_all_coins > 0:
-        time_left_fraction = float(self.round_time_left_after_all_coins) / float(max(1, s.MAX_STEPS))
+        time_left_fraction = (
+            float(self.round_time_left_after_all_coins)
+            / float(max(1, s.MAX_STEPS))
+        )
+
         self.logger.info(
-            "All coins collected with %d steps remaining (%.3f fraction of total steps).",
+            "All coins collected with %d steps remaining "
+            "(%.3f fraction of total steps).",
             self.round_time_left_after_all_coins,
             time_left_fraction,
         )
-    if current_score > self.best_score:
-        self.best_score = current_score
-        self.best_score_coins_collected = int(self.round_coins_collected)
-        self.best_score_enemies_killed = int(self.round_number_kills)
-        self.best_score_time_left_after_all_coins = int(self.round_time_left_after_all_coins)
-        torch.save(self.policy_net.state_dict(), BEST_MODEL_FILE)
-        self.logger.info(
-            "Saved new best model with score %.3f.",
-            current_score,
-        )
 
+    # Every round must start with clean episode statistics, regardless of
+    # whether all coins were collected.
+    self.round_game_score = 0.0
     self.round_coins_collected = 0
     self.round_number_kills = 0
     self.round_time_left_after_all_coins = 0
+    self.round_all_coins_collected = False
+
     self.previous_old_position = None
+    self.previous_velocity = (0, 0)
     self.position_history.clear()
+
     _save_hyperparameters(self)
 
 
