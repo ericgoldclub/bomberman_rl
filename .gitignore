@@ -113,3 +113,6 @@ replays/
 results/agent_code/dqn_agent_working_version/dqn-replay-buffer.pkl
 path/to/directory/
 agent_code/dqn_agent/dqn-replay-buffer.pkl
+
+# DQN replay/current buffer
+agent_code/dqn_agent_v2/dqn-current-buffer

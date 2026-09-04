@@ -39,7 +39,7 @@ BEST_MODEL_FILE = os.path.join(
 
 PRETRAINED_MODEL_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-30best-crate-burster_v2.pt",
+    "dqn-30best-crate-burster_v3.pt",
 )
 REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
