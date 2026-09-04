@@ -9,7 +9,23 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .callbacks import (ACTIONS, BOMB_POWER, BOMB_TIMER, can_hit_crate_with_bomb, explosion_tiles_from_bomb, state_to_features, MODEL_FILE, BOARD_CHANNELS, BOARD_SIZE, VECTOR_DIM, useful_bomb_positions, valid_action_mask, can_hit_enemy_with_bomb, has_escape_after_bomb, enemy_has_escape_after_bomb)
+from .callbacks import (
+    ACTIONS,
+    BOARD_CHANNELS,
+    BOARD_SIZE,
+    BOMB_POWER,
+    BOMB_TIMER,
+    MODEL_FILE,
+    VECTOR_DIM,
+    can_hit_crate_with_bomb,
+    can_hit_enemy_with_bomb,
+    enemy_has_escape_after_bomb,
+    explosion_tiles_from_bomb,
+    has_survival_path,
+    state_to_features,
+    useful_bomb_positions,
+    valid_action_mask,
+)
 
 import events as e
 
@@ -139,6 +155,9 @@ def setup_training(self):
     self.position_history = deque(maxlen=4)  # Store the last 4 positions to detect oscillation
     self.last_bomb_positions = None  # Store the last bomb positions to detect if the agent is trapped
     self.steps_since_last_bomb = None  # Counter for steps since the last bomb was dropped
+    self.last_features = None
+    self.last_transition_step = None
+    self.last_transition_action = None
 
     
     # Device
@@ -224,12 +243,20 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if not hasattr(self, 'position_history'):
         self.position_history = deque(maxlen=4)
 
-    old_state = state_to_features(old_game_state, position_history=self.position_history) if old_game_state is not None else None
+    old_state = None
+    if old_game_state is not None:
+        old_state = getattr(self, 'last_features', None)
+        if old_state is None:
+            old_state = state_to_features(
+                old_game_state,
+                position_history=self.position_history,
+            )
 
     if new_game_state is not None:
         new_pos = new_game_state['self'][3]
-        if len(self.position_history) == 0 or self.position_history[-1] != new_pos:
-            self.position_history.append(new_pos)
+        # Keep one entry per environment step. WAIT must also be represented,
+        # otherwise one old A-B-A pattern is punished repeatedly.
+        self.position_history.append(new_pos)
 
     new_state = state_to_features(new_game_state, position_history=self.position_history) if new_game_state is not None else None
     #did we move closer to a coin or further away from it?
@@ -277,7 +304,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
         hits_enemy = can_hit_enemy_with_bomb(field, old_pos[0], old_pos[1], enemies)
         hits_crate = can_hit_crate_with_bomb(field, old_pos[0], old_pos[1])
-        escape_possible = has_escape_after_bomb(field, bombs, explosion_map, old_pos)
+        # The new state already contains the bomb. Check the complete timed
+        # escape path, including other bombs, lingering blasts and opponents.
+        escape_possible = has_survival_path(new_game_state)
         traps_enemy = any(
             can_hit_enemy_with_bomb(field, old_pos[0], old_pos[1], [enemy])
             and not enemy_has_escape_after_bomb(field, bombs, explosion_map, enemy, old_pos)
@@ -305,17 +334,14 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     
 
-    #check for oscillation A -> B -> A -> B
+    # Check for A-B-A or A-B-A-B, but add the event only once.
     if old_state is not None and new_state is not None:
-        if len(self.position_history) >= 3: 
-            if self.position_history[-1] == self.position_history[-3]:
-                events.append(e.OSCILLATION)
-
-        if len(self.position_history) >= 4: 
-            if self.position_history[-1] == self.position_history[-3] and self.position_history[-2] == self.position_history[-4]:
-                events.append(e.OSCILLATION)
-
-    new_state = state_to_features(new_game_state, position_history=self.position_history) if new_game_state is not None else None
+        is_oscillating = (
+            len(self.position_history) >= 3
+            and self.position_history[-1] == self.position_history[-3]
+        )
+        if is_oscillating:
+            events.append(e.OSCILLATION)
 
 
     #check for enemy proximity
@@ -344,26 +370,24 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 events.append(e.MOVED_AWAY_FROM_ENEMY)
 
 
-    if old_state is not None and new_state is not None and self.last_bomb_positions is not None and self.steps_since_last_bomb is not None:
+    just_dropped_bomb = self_action == 'BOMB'
+    if (
+        old_state is not None
+        and new_state is not None
+        and self.last_bomb_positions is not None
+        and self.steps_since_last_bomb is not None
+        and not just_dropped_bomb
+    ):
         old_pos = old_game_state['self'][3]
         new_pos = new_game_state['self'][3]
         field = new_game_state['field']
 
-        old_dist = abs(old_pos[0] - self.last_bomb_positions[0]) + abs(old_pos[1] - self.last_bomb_positions[1])
-        new_dist = abs(new_pos[0] - self.last_bomb_positions[0]) + abs(new_pos[1] - self.last_bomb_positions[1])
-
         own_blast_tiles = explosion_tiles_from_bomb(field, self.last_bomb_positions)
 
-        if new_dist > old_dist:
-            events.append(e.MOVED_AWAY_FROM_OWN_BOMB)
-        elif new_dist < old_dist:
-            events.append(e.MOVED_TOWARDS_OWN_BOMB)
-
-        if new_pos in own_blast_tiles:   
-            events.append(e.STAYED_IN_OWN_BLAST) 
-       
         if old_pos in own_blast_tiles and new_pos not in own_blast_tiles:
             events.append(e.ESCAPED_OWN_BOMB)
+        elif new_pos in own_blast_tiles and not has_survival_path(new_game_state):
+            events.append(e.STAYED_IN_OWN_BLAST)
 
     
     # Update counters and train only every n environment steps.
@@ -374,6 +398,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # Store transition
     if old_state is not None:
         self.replay_buffer.append(Transition(old_state, self_action, new_state, reward, valid_action_mask(new_game_state)))
+        self.last_transition_step = old_game_state.get('step')
+        self.last_transition_action = self_action
 
     if self.steps_done % TRAIN_EVERY == 0:
         for _ in range(TRAINING_STEPS):
@@ -386,11 +412,40 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
-    last_state = state_to_features(last_game_state, position_history=self.position_history)
-    reward = reward_from_events(self, events)
-    # terminal state: next_state is None
-    if last_state is not None:
-        self.replay_buffer.append(Transition(last_state, last_action, None, reward, None ))
+    last_state = getattr(self, 'last_features', None)
+    if last_state is None:
+        last_state = state_to_features(last_game_state, position_history=self.position_history)
+
+    transition_already_stored = (
+        bool(self.replay_buffer)
+        and last_game_state is not None
+        and self.last_transition_step == last_game_state.get('step')
+        and self.last_transition_action == last_action
+    )
+
+    if transition_already_stored:
+        # A surviving agent receives game_events_occurred for the final action
+        # before end_of_round. Convert that existing transition to terminal
+        # instead of inserting the same (state, action) a second time.
+        previous = self.replay_buffer.pop()
+        terminal_bonus = reward_from_events(
+            self,
+            [event for event in events if event == e.SURVIVED_ROUND],
+        )
+        self.replay_buffer.append(
+            previous._replace(
+                next_state=None,
+                reward=previous.reward + terminal_bonus,
+                next_action_mask=None,
+            )
+        )
+    elif last_state is not None:
+        # Dead agents do not receive game_events_occurred for their final
+        # action, so this is the only transition for that action.
+        reward = reward_from_events(self, events)
+        self.replay_buffer.append(
+            Transition(last_state, last_action, None, reward, None)
+        )
 
     # Do some final optimization passes
     for _ in range(10):
@@ -406,49 +461,62 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         "steps_done": self.steps_done,
     }, MODEL_FILE)
 
+    self.last_features = None
+    self.position_history.clear()
+    self.last_bomb_positions = None
+    self.steps_since_last_bomb = None
+    self.last_transition_step = None
+    self.last_transition_action = None
+
 
 def reward_from_events(self, events: List[str]) -> float:
     game_rewards = {
-        # Real outcomes dominate, heuristic shaping only nudges.
-        e.KILLED_OPPONENT: 10.0,
-        e.KILLED_SELF: -10.0,
-        e.GOT_KILLED: -8.0,
-        e.SURVIVED_ROUND: 1.0,
+        # Real outcomes dominate; heuristic shaping only nudges.
+        e.KILLED_OPPONENT: 15.0,
+        e.SURVIVED_ROUND: 2.0,
 
         # Coins and crates.
-        e.COIN_COLLECTED: 4.0,
-        e.COIN_FOUND: 1.5,
-        e.CRATE_DESTROYED: 0.75,
+        e.COIN_COLLECTED: 5.0,
+        e.COIN_FOUND: 0.5,
+        e.CRATE_DESTROYED: 1.0,
 
         # Bomb placement heuristics.
-        e.KILL_BOMB_DROPPED: 2.5,
-        e.ENEMY_PRESSURE_BOMB_DROPPED: 1.0,
-        e.CRATE_BOMB_DROPPED: 0.8,
-        e.USELESS_BOMB_DROPPED: -4.0,
+        e.KILL_BOMB_DROPPED: 0.75,
+        e.ENEMY_PRESSURE_BOMB_DROPPED: 0.3,
+        e.CRATE_BOMB_DROPPED: 0.2,
+        e.USELESS_BOMB_DROPPED: -0.5,
 
         # Escape behavior after our own bomb.
-        e.MOVED_AWAY_FROM_OWN_BOMB: 1.2,
-        e.MOVED_TOWARDS_OWN_BOMB: -1.2,
-        e.STAYED_IN_OWN_BLAST: -3.0,
-        e.ESCAPED_OWN_BOMB: 3.0,
+        e.STAYED_IN_OWN_BLAST: -1.0,
+        e.ESCAPED_OWN_BOMB: 0.3,
 
         # Movement shaping.
-        e.MOVED_CLOSE_TO_ENEMY: 0.4,
-        e.MOVED_AWAY_FROM_ENEMY: -0.4,
-        e.MOVED_CLOSE_TO_COIN: 0.2,
-        e.MOVED_AWAY_FROM_COIN: -0.2,
-        e.MOVED_TOWARDS_CRATE: 0.15,
-        e.MOVED_AWAY_FROM_CRATE: -0.15,
+        e.MOVED_CLOSE_TO_ENEMY: 0.05,
+        e.MOVED_AWAY_FROM_ENEMY: -0.05,
+        e.MOVED_CLOSE_TO_COIN: 0.05,
+        e.MOVED_AWAY_FROM_COIN: -0.05,
+        e.MOVED_TOWARDS_CRATE: 0.03,
+        e.MOVED_AWAY_FROM_CRATE: -0.03,
 
         # Bad behavior and time pressure.
-        e.INVALID_ACTION: -3.0,
-        e.WAITED: -0.5,
-        e.OSCILLATION: -1.0,
-        e.STEP_PENALTY: -0.05,
+        e.INVALID_ACTION: -1.0,
+        e.WAITED: -0.02,
+        e.OSCILLATION: -0.1,
+        e.STEP_PENALTY: -0.01,
         }
-    reward_sum = 0.0
-    for event in events:
-        if event in game_rewards:
-            reward_sum += game_rewards[event]
-    self.logger.info(f"Awarded {reward_sum:.2f} for events {', '.join(events)}")
+
+    reward_sum = sum(game_rewards.get(event, 0.0) for event in events)
+
+    # A suicide produces both KILLED_SELF and GOT_KILLED. Treat it as one
+    # outcome instead of stacking two unrelated death penalties.
+    if e.KILLED_SELF in events:
+        reward_sum -= 20.0
+    elif e.GOT_KILLED in events:
+        reward_sum -= 15.0
+
+    self.logger.info(
+        "Awarded %.2f for events %s",
+        reward_sum,
+        ', '.join(events),
+    )
     return reward_sum
