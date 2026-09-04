@@ -260,7 +260,7 @@ def setup(self):
         self.target_net = HybridDQN(board_channels=BOARD_CHANNELS, vector_dim=VECTOR_DIM, output_dim=output_dim).to(self.device)
         if not self.train and os.path.isfile(MODEL_FILE):
             self.logger.info("Loading DQN model from disk.")
-            state = torch.load(MODEL_FILE, map_location=self.device)
+            state = torch.load(MODEL_FILE, map_location=self.device, weights_only = False)
 
             if isinstance(state, dict) and 'model_state_dict' in state:
                 model_state = state['model_state_dict']

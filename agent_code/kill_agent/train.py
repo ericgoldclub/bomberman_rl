@@ -21,7 +21,7 @@ BATCH_SIZE = 16
 GAMMA = 0.97
 LR = 1e-3
 TARGET_UPDATE = 512  # steps
-MIN_REPLAY_SIZE = 256
+MIN_REPLAY_SIZE = 1024
 TRAINING_STEPS = 4
 TRAIN_EVERY = 4
 
@@ -34,20 +34,50 @@ class HybridDQN(nn.Module):
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.ReLU(),
+            nn.Conv2d(32,64, kernel_size = 3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64,64, kernel_size = 3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64,64, kernel_size = 3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64,64, kernel_size = 3, padding=1),
+            nn.ReLU(),
             nn.Flatten()
         )
 
-        cnn_out = 32 * BOARD_SIZE**2 # Assuming BOARD_SIZE is defined elsewhere
+        cnn_out = 64 * BOARD_SIZE**2 # Assuming BOARD_SIZE is defined elsewhere
 
         self.mlp = nn.Sequential(
             nn.Linear(vector_dim, 256),
             nn.ReLU(),
-            nn.Linear(256, 128),
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256,128),
             nn.ReLU(),
             nn.Linear(128, output_dim)
         )
         self.head = nn.Sequential(
             nn.Linear(cnn_out + output_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Linear(512, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
             nn.ReLU(),
             nn.Linear(256, output_dim)
         )
@@ -76,7 +106,7 @@ def setup_training(self):
 
     if os.path.isfile(MODEL_FILE):
         self.logger.info("Loading existing DQN model for continued training.")
-        state = torch.load(MODEL_FILE, map_location=self.device)
+        state = torch.load(MODEL_FILE, map_location=self.device, weights_only = False)
         if isinstance(state, dict) and 'model_state_dict' in state:
             self.policy_net.load_state_dict(state['model_state_dict'])
             self.target_net.load_state_dict(state['model_state_dict'])
@@ -335,12 +365,12 @@ def reward_from_events(self, events: List[str]) -> float:
         e.KILLED_OPPONENT: 10.0,
         e.KILLED_SELF: -10.0,
         e.GOT_KILLED: -8.0,
-        e.SURVIVED_ROUND: 2.0,
+        e.SURVIVED_ROUND: 1.0,
 
         # Coins and crates.
         e.COIN_COLLECTED: 4.0,
-        e.COIN_FOUND: 1.0,
-        e.CRATE_DESTROYED: 1.5,
+        e.COIN_FOUND: 1.5,
+        e.CRATE_DESTROYED: 1.0,
 
         # Bomb placement heuristics.
         e.KILL_BOMB_DROPPED: 2.5,
@@ -349,14 +379,14 @@ def reward_from_events(self, events: List[str]) -> float:
         e.USELESS_BOMB_DROPPED: -4.0,
 
         # Escape behavior after our own bomb.
-        e.MOVED_AWAY_FROM_OWN_BOMB: 0.8,
+        e.MOVED_AWAY_FROM_OWN_BOMB: 1.2,
         e.MOVED_TOWARDS_OWN_BOMB: -1.2,
-        e.STAYED_IN_OWN_BLAST: -2.5,
+        e.STAYED_IN_OWN_BLAST: -3.0,
         e.ESCAPED_OWN_BOMB: 3.0,
 
         # Movement shaping.
         e.MOVED_CLOSE_TO_ENEMY: 0.4,
-        e.MOVED_AWAY_FROM_ENEMY: -0.3,
+        e.MOVED_AWAY_FROM_ENEMY: -0.4,
         e.MOVED_CLOSE_TO_COIN: 0.2,
         e.MOVED_AWAY_FROM_COIN: -0.2,
         e.MOVED_TOWARDS_CRATE: 0.15,
@@ -364,8 +394,8 @@ def reward_from_events(self, events: List[str]) -> float:
 
         # Bad behavior and time pressure.
         e.INVALID_ACTION: -3.0,
-        e.WAITED: -0.4,
-        e.OSCILLATION: -1.0,
+        e.WAITED: -1,
+        e.OSCILLATION: -0.5,
         e.STEP_PENALTY: -0.05,
         }
     reward_sum = 0.0

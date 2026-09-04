@@ -17,5 +17,5 @@ def get_tau(hours, eps_end):
 
     return round(steps/np.log(val))
 
-tau = get_tau(hours=int(input("Enter the number of training hours: ")), eps_end=0.07)
+tau = get_tau(hours=float(input("Enter the number of training hours: ")), eps_end=0.07)
 print(tau)
