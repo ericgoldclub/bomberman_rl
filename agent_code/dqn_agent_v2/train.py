@@ -39,11 +39,11 @@ BEST_MODEL_FILE = os.path.join(
 
 PRETRAINED_MODEL_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-30best-crate-burster_v3.pt",
+    "dqn-30best-crate-burster_v1.pt",
 )
 REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-current-buffer",
+    "dqn-current-buffer.pkl",
 )
 PRETRAINED_REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
@@ -140,35 +140,36 @@ CHECKPOINT_VERSION = 1
 REPLAY_BUFFER_VERSION = 1
 REPLAY_SAVE_EVERY_ROUNDS = 150
 
-BEST_MODEL_METRIC_VERSION = 2
+BEST_MODEL_METRIC_VERSION = 1
 FEATURE_VERSION = 1
 REWARD_VERSION = 1
 
-SUICIDE_REWARD = -2.0
-SUICIDE_SELECTION_PENALTY = 1.0
-CRATE_SELECTION_REWARD = 0.35
+SUICIDE_REWARD = -6.0
+SUICIDE_SELECTION_PENALTY = 2.0
+CRATE_SELECTION_REWARD = 0.15
+KILL_SELECTION_REWARD = 0.5
 
 from .Networks import DQN_prev as DQN_net
 
 MAJOR_REWARDS = {
     e.COIN_COLLECTED: 1.0,
     e.KILLED_OPPONENT: 5.0,
-    e.GOT_KILLED: -2.0,
-    e.COIN_FOUND: 0.60,
+    e.GOT_KILLED: -2.5,
+    e.COIN_FOUND: 0.10,
     e.OPPONENT_ELIMINATED: 0.0,
-    e.CRATE_DESTROYED: 0.35,
-    e.BOMB_EXPLODED: 0.3,
+    e.CRATE_DESTROYED: 0.05,
+    e.BOMB_EXPLODED: 0.05,
 }
 
 SHAPING_REWARDS = {
     e.REVERSED_DIRECTION: -0.015, # small penalty for reversing direction
     e.IN_DANGER: -0.1,
-    e.WAITED: 0.05, # small penalty for waiting
+    e.WAITED: -0.05, # small penalty for waiting
 }
 
 
 ALL_COINS_CLEAR_BONUS = 5.0 #   bonus reward for clearing all coins
-STEP_TIME_COST = 0.002 # penalty for each step to encourage faster completion of objectives
+STEP_TIME_COST = 0.005 # penalty for each step to encourage faster completion of objectives
 
 def _transition_key(game_state: dict | None, action: str):
     """Identify the environment action represented by a replay transition."""
@@ -280,6 +281,9 @@ def _save_hyperparameters(self) -> None:
         "BEST_MODEL_SCORE": f"{float(self.best_score):.1f}",
         "BEST_MODEL_COINS_COLLECTED": f"{int(self.best_score_coins_collected)}",
         "BEST_MODEL_ENEMIES_KILLED": f"{int(self.best_score_enemies_killed)}",
+        "BEST_MODEL_MEAN_ENEMIES_KILLED": (
+            f"{self.best_mean_enemies_killed:.5f}"
+        ),
         "BEST_MODEL_TIME_LEFT_AFTER_ALL_COINS": f"{int(self.best_score_time_left_after_all_coins)}",
         "BEST_MODEL_COMPLETION_RATE": (f"{self.best_completion_rate:.5f}"),
         "BEST_MODEL_MEAN_TIME_LEFT": (f"{self.best_mean_time_left:.5f}"),
@@ -346,6 +350,9 @@ def _save_latest_checkpoint(self) -> None:
         ),
         "best_score_enemies_killed": int(
             self.best_score_enemies_killed
+        ),
+        "best_mean_enemies_killed": float(
+            self.best_mean_enemies_killed
         ),
         "best_score_time_left_after_all_coins": int(
             self.best_score_time_left_after_all_coins
@@ -490,6 +497,12 @@ def _restore_latest_checkpoint(self) -> None:
                 0,
             )
         )
+        self.best_mean_enemies_killed = float(
+            checkpoint.get(
+                "best_mean_enemies_killed",
+                self.best_score_enemies_killed / self.eval_rounds,
+            )
+        )
         self.best_score_time_left_after_all_coins = int(
             checkpoint.get(
                 "best_score_time_left_after_all_coins",
@@ -523,6 +536,7 @@ def _restore_latest_checkpoint(self) -> None:
         self.best_score = -1.0
         self.best_score_coins_collected = 0
         self.best_score_enemies_killed = 0
+        self.best_mean_enemies_killed = 0.0
         self.best_score_time_left_after_all_coins = 0
         self.best_completion_rate = 0.0
         self.best_mean_time_left = 0.0
@@ -798,6 +812,16 @@ def _complete_evaluation_block(self) -> None:
     completion_rate = float(np.mean(completions))
     suicide_rate = float(np.mean(suicides))
     mean_crates_destroyed = float(np.mean(crates_destroyed))
+    total_enemies_killed = int(
+        sum(
+            result.get("enemies_killed", 0)
+            for result in self._evaluation_results
+        )
+    )
+    mean_enemies_killed = (
+        total_enemies_killed / len(self._evaluation_results)
+    )
+    
 
     if completed_times:
         mean_time_left = float(np.mean(completed_times))
@@ -808,6 +832,7 @@ def _complete_evaluation_block(self) -> None:
     selection_score = (
         mean_game_score
         + CRATE_SELECTION_REWARD * mean_crates_destroyed
+        + KILL_SELECTION_REWARD * mean_enemies_killed
         - SUICIDE_SELECTION_PENALTY * suicide_rate
     )
 
@@ -848,6 +873,8 @@ def _complete_evaluation_block(self) -> None:
     if candidate_metric > best_metric:
         self.best_selection_score = selection_score
         self.best_score = mean_game_score
+        self.best_score_enemies_killed = total_enemies_killed
+        self.best_mean_enemies_killed = mean_enemies_killed
         self.best_suicide_rate = suicide_rate
         self.best_mean_crates_destroyed = mean_crates_destroyed
         self.best_completion_rate = completion_rate
@@ -909,6 +936,7 @@ def setup_training(self):
     self.best_score = -1.0
     self.best_score_coins_collected = 0
     self.best_score_enemies_killed = 0
+    self.best_mean_enemies_killed = 0.0
     self.best_score_time_left_after_all_coins = 0
     self.best_selection_score = float("-inf")
     self.best_suicide_rate = 1.0
@@ -1343,15 +1371,17 @@ def game_events_occurred(
     reward = reward_from_events(self, events)
 
     # ------------------------------------------------------------
-    # Detect completion
-    #
-    # Give the bonus exactly when the last coin is collected.
+    # Detect completion. Award the completion and time bonuses only after both
+    # objectives are satisfied: every coin is collected and no enemy remains.
+    # This also handles the case where the last enemy is killed after the last
+    # coin was collected.
     # ------------------------------------------------------------
 
     if new_game_state is not None:
         if (
             not self.round_all_coins_collected
             and self.round_coins_collected >= self.total_coins_for_task
+            and len(new_game_state.get("others", ())) == 0
         ):
             time_left = max(0, int(s.MAX_STEPS) - int(new_game_state.get("step", 0)))
             self.round_all_coins_collected = True
@@ -1363,7 +1393,8 @@ def game_events_occurred(
 
             if getattr(self, "log_dqn_details", False):
                 self.logger.info(
-                    "All coins collected: completion bonus +%.2f, "
+                    "All coins collected and all enemies eliminated: "
+                    "completion bonus +%.2f, "
                     "time bonus +%.3f (%d steps left)",
                     ALL_COINS_CLEAR_BONUS,
                     time_left_fraction,
@@ -1460,6 +1491,10 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
             )
 
         suicided = e.KILLED_SELF in events
+        evaluation_kills = self.round_number_kills
+        if died_on_final_action:
+            # game_events_occurred() is skipped for a fatal final action.
+            evaluation_kills += events.count(e.KILLED_OPPONENT)
 
         self._evaluation_results.append(
             {
@@ -1476,6 +1511,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
                 "crates_destroyed": int(
                     self.round_crates_destroyed
                 ),
+                "enemies_killed": int(evaluation_kills),
             }
         )
 
@@ -1485,7 +1521,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
         self.logger.info(
             "Evaluation round finished: score=%.1f "
-            "completed=%s crates_destroyed=%d suicided=%s "
+            "all_objectives_completed=%s crates_destroyed=%d suicided=%s "
             "time_left=%d remaining=%d.",
             self.round_game_score,
             self.round_all_coins_collected,
@@ -1607,7 +1643,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         )
 
         self.logger.info(
-            "All coins collected with %d steps remaining "
+            "All coins collected and all enemies eliminated with "
+            "%d steps remaining "
             "(%.3f fraction of total steps).",
             self.round_time_left_after_all_coins,
             time_left_fraction,
