@@ -39,7 +39,7 @@ BEST_MODEL_FILE = os.path.join(
 
 PRETRAINED_MODEL_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-30best-crate-burster_v1.pt",
+    "dqn-30best-crate-burster_v3.pt",
 )
 REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
@@ -47,7 +47,7 @@ REPLAY_BUFFER_FILE = os.path.join(
 )
 PRETRAINED_REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-incremented-replay-buffer3.pkl",
+    "dqn-incremented-replay-buffer_v3.pkl",
 )
 
 TRAINING_START_MODES = {"fresh", "resume", "transfer"}

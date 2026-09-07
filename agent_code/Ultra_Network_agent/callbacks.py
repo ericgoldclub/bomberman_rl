@@ -382,7 +382,7 @@ def setup(self):
     """Setup called once when loading the agent."""
     # hyperparams for acting
     self.epsilon = 1.0
-    self.decay_const = 569840
+    self.decay_const = 969840
     self.position_history = deque(maxlen=4)
     self.last_features = None
     # Load model if available

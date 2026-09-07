@@ -278,8 +278,67 @@ def _blast_positions(field, x, y, power):
     return blast
 
 
+def _bomb_has_escape_route(game_state: dict) -> bool:
+    """Return whether a newly placed bomb leaves time to exit its blast."""
+    if game_state is None:
+        return False
+
+    field = game_state["field"]
+    _, _, _, start = game_state["self"]
+    blast = _blast_positions(field, *start, s.BOMB_POWER)
+    blocked = {
+        position
+        for position, _ in game_state.get("bombs", ())
+    }
+    blocked.update(
+        other[-1]
+        for other in game_state.get("others", ())
+        if other[-1] is not None
+    )
+
+    frontier = deque([(start, 0)])
+    visited = {start}
+
+    while frontier:
+        position, distance = frontier.popleft()
+        if distance > 0 and position not in blast:
+            return True
+        if distance >= s.BOMB_TIMER:
+            continue
+
+        x, y = position
+        for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+            neighbor = (x + dx, y + dy)
+            nx, ny = neighbor
+            if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
+                continue
+            if field[nx, ny] != 0 or neighbor in blocked:
+                continue
+            if neighbor == start or neighbor in visited:
+                continue
+            visited.add(neighbor)
+            frontier.append((neighbor, distance + 1))
+
+    return False
+
+
+def _bomb_targets_enemy(game_state: dict) -> bool:
+    """Return whether a bomb at the agent position currently covers an enemy."""
+    if game_state is None:
+        return False
+
+    field = game_state["field"]
+    _, _, _, (x, y) = game_state["self"]
+    blast = _blast_positions(field, x, y, s.BOMB_POWER)
+    return any(
+        other[-1] in blast
+        for other in game_state.get("others", ())
+        if other[-1] is not None
+    )
+
+
 def _bomb_is_unsafe(game_state: dict) -> bool:
-    """Reject bomb actions unless they can hit a crate or an enemy."""
+    """Reject bombs that are useless or leave no static escape route."""
     if game_state is None:
         return True
 
@@ -296,7 +355,8 @@ def _bomb_is_unsafe(game_state: dict) -> bool:
         for (cx, cy) in blast
         for ox, oy in [o[-1] for o in game_state["others"] if o[-1] is not None]
     )
-    return not crates_in_range and not enemies_in_range
+    useful = crates_in_range or enemies_in_range
+    return not useful or not _bomb_has_escape_route(game_state)
 
 
 def _policy_action_mask(game_state: dict) -> np.ndarray:
