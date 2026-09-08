@@ -17,6 +17,7 @@ DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
 
 GRID_CHANNELS = 10  # number of channels in the grid input to the DQN
 SCALAR_FEATURES = 8 + len(ACTIONS)  # base scalar features + one-hot last action
+COIN_COUNT = 9  # Coins spawned in the tournament's classic scenario.
 
 
 
@@ -543,7 +544,7 @@ def state_to_features(game_state: dict, last_action_index: int | None = None) ->
 
     bombs_left = 1.0 if game_state["self"][2] else 0.0
 
-    coins_left_normalized = float(len(coins)) / (max(1.0, float(s.COIN_COUNT)))
+    coins_left_normalized = float(len(coins)) / max(1.0, float(COIN_COUNT))
     time_remaining = np.clip(1.0 - float(game_state["step"])/float(s.MAX_STEPS), 0.0, 1.0)
 
     enemies_remaining = float(len(others)) / max(1.0, float(s.MAX_AGENTS - 1))

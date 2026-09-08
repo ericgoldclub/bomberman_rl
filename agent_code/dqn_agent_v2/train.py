@@ -39,7 +39,7 @@ BEST_MODEL_FILE = os.path.join(
 
 PRETRAINED_MODEL_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-30best-crate-burster_v3.pt",
+    "dqn-best-coin-collector.pt",
 )
 REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
@@ -47,11 +47,12 @@ REPLAY_BUFFER_FILE = os.path.join(
 )
 PRETRAINED_REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-incremented-replay-buffer_v3.pkl",
+    "dqn-coin-collector-buffer.pkl",
 )
 
 TRAINING_START_MODES = {"fresh", "resume", "transfer"}
 VERBOSE_TRAIN_LOGS = False
+COIN_COUNT = 9  # Coins spawned in the tournament's classic scenario.
 
 Transition = namedtuple(
     'Transition',
@@ -925,7 +926,7 @@ def setup_training(self):
     self.round_game_score = 0.0
     self.round_all_coins_collected = False
     self.total_coins_for_task = int(
-        os.environ.get("DQN_TOTAL_COINS", s.COIN_COUNT)
+        os.environ.get("DQN_TOTAL_COINS", COIN_COUNT)
     )
 
     if self.total_coins_for_task <= 0:
