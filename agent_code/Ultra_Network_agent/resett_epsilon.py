@@ -11,7 +11,7 @@ if not os.path.isfile(path):
 state = torch.load(path, map_location="cpu", weights_only = False)
 epsilon_min = 0.05
 epsilon_max = 1.0
-decay_const = 969840.0
+decay_const = 369840.0
 
 print("Please input desired epsilon done : ")
 epsilon = float(input())

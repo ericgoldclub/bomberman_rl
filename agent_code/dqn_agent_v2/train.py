@@ -39,7 +39,7 @@ BEST_MODEL_FILE = os.path.join(
 
 PRETRAINED_MODEL_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-best-killer.pt",
+    "dqn-best-lootcrate.pt",
 )
 REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
@@ -47,7 +47,7 @@ REPLAY_BUFFER_FILE = os.path.join(
 )
 PRETRAINED_REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-best-killer-buffer.pkl",
+    "dqn-best-lootcrate-buffer.pkl",
 )
 
 TRAINING_START_MODES = {"fresh", "resume", "transfer"}
@@ -154,12 +154,13 @@ from .Networks import DQN_prev as DQN_net
 
 MAJOR_REWARDS = {
     e.COIN_COLLECTED: 1.0,
-    e.KILLED_OPPONENT: 6.5,
-    e.GOT_KILLED: -2.5,
+    e.KILLED_OPPONENT: 5.5,
+    e.GOT_KILLED: -4.5,
+    e.KILLED_SELF: -8.0,
     e.COIN_FOUND: 0.10,
     e.OPPONENT_ELIMINATED: 0.0,
-    e.CRATE_DESTROYED: 0.05,
-    e.BOMB_EXPLODED: 0.05,
+    e.CRATE_DESTROYED: 0.02,
+    e.BOMB_EXPLODED: 0.0,
 }
 
 SHAPING_REWARDS = {
@@ -170,7 +171,7 @@ SHAPING_REWARDS = {
 
 
 ALL_COINS_CLEAR_BONUS = 5.0 #   bonus reward for clearing all coins
-STEP_TIME_COST = 0.005 # penalty for each step to encourage faster completion of objectives
+STEP_TIME_COST = 0.001 # penalty for each step to encourage faster completion of objectives
 
 def _transition_key(game_state: dict | None, action: str):
     """Identify the environment action represented by a replay transition."""
@@ -1698,7 +1699,7 @@ def reward_from_events(self, events: List[str]) -> float:
     if suicided:
         major_sum += SUICIDE_REWARD
 
-    shaping_sum = float(np.clip(shaping_sum, -0.1, 0.1))
+    shaping_sum = float(np.clip(shaping_sum, -0.3, 0.3))
     reward_sum = major_sum + shaping_sum - STEP_TIME_COST
 
     if getattr(self, "log_dqn_details", False):

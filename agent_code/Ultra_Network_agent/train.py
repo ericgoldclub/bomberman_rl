@@ -502,7 +502,7 @@ def reward_from_events(self, events: List[str]) -> float:
         e.INVALID_ACTION: -1.0,
         e.WAITED: -0.02,
         e.OSCILLATION: -0.1,
-        e.STEP_PENALTY: -0.01,
+        e.STEP_PENALTY: -0.015,
         }
 
     reward_sum = sum(game_rewards.get(event, 0.0) for event in events)

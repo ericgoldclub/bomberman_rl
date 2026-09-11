@@ -1,0 +1,236 @@
+1. Ausgangspunkt: Agent_1_2_QL
+
+1.1 Agent_1_2_QL bildet den Ausgangspunkt der Subgoal-2-Entwicklung.
+Der Agent verwendet weiterhin tabellarisches Q-Learning und war primär auf Subgoal 1 ausgelegt:
+sichtbare Coins auf einem Spielfeld ohne Kisten und Gegner möglichst effizient einzusammeln.
+
+1.2 Die Zustandsrepräsentation von Agent_1_2_QL ist bewusst kompakt.
+Sie besteht aus der Richtung des mittels Breitensuche bestimmten kürzesten Weges zum nächsten
+sichtbaren Coin sowie vier booleschen Merkmalen dafür, ob die Nachbarfelder oben, rechts, unten und links begehbar sind.
+Konkrete Agenten- oder Coin-Koordinaten sind nicht Teil des Zustands,
+sodass gelernte Situationen an unterschiedlichen Positionen wiederverwendet werden können.
+
+1.3 Die Aktionsmenge von Agent_1_2_QL enthält lediglich UP, RIGHT, DOWN, LEFT und WAIT.
+Das Legen einer Bombe ist noch nicht vorgesehen. Auch Bomben, Explosionen, Kisten, Fluchtwege
+oder eine mögliche Selbstgefährdung werden in den Features nicht berücksichtigt.
+
+1.4 Das Reward Shaping von Agent_1_2_QL belohnt das Einsammeln eines Coins stark,
+bestraft ungültige Aktionen und unnötiges Warten und ergänzt kleine Zwischenrewards dafür,
+ob sich die BFS-Distanz zum nächsten Coin verringert oder vergrößert. Damit ist der Agent für Navigation geeignet,
+aber noch nicht für die zusätzliche Komplexität von Subgoal 2.
+
+1.5 Bereits in Agent_1_2_QL konnten gelegentliche Oszillationen auftreten, also Bewegungen zwischen
+wenigen Feldern ohne echten Fortschritt. Für Subgoal 1 waren diese Schleifen
+bereits deutlich reduziert, mussten für ein Spielfeld mit Kisten und Bomben jedoch robuster behandelt werden.
+
+2. Ziel der Erweiterung: Subgoal 2
+
+2.1 Subgoal 2 der Projektaufgabe verlangt ein Spielfeld mit zufällig verteilten Kisten, aber ohne Gegner.
+Der Agent soll die zunächst versteckten Coins finden und innerhalb des Schrittlimits einsammeln.
+Dafür muss er Kisten gezielt mit Bomben zerstören und gleichzeitig lernen, den eigenen
+Explosionen zuverlässig zu entkommen.
+
+2.2 Gegenüber Subgoal 1 entstehen damit drei zusätzliche Kernanforderungen:
+Erstens muss der Agent nicht nur zu sichtbaren Coins, sondern auch zu sinnvollen Bombenpositionen an Kisten navigieren.
+Zweitens muss er Bomben als eigene Aktion lernen und zwischen sinnvollen, unnötigen und gefährlichen
+Bombenwürfen unterscheiden.
+Drittens muss die Flucht aus Bombenradien vor der normalen Coin- oder Kistennavigation priorisiert werden.
+
+
+3. Grundlegende Änderungen in Agent_2_3_QL
+
+3.1 Die Aktionsmenge wurde um BOMB erweitert. Damit kann Q-Learning nun nicht nur Bewegungsentscheidungen,
+sondern auch den Einsatz von Bomben bewerten. BOMB wird nur dann als ausführbare Aktion betrachtet,
+wenn laut Spielzustand aktuell eine eigene Bombe gelegt werden darf; ob der Bombenwurf in der
+jeweiligen Situation sinnvoll ist, bleibt Bestandteil des Lernproblems.
+
+3.2 Der bisherige anonyme Feature-Tupel wurde durch das hashbare namedtuple StateFeatures ersetzt.
+Der Zustand enthält nun target_direction, free_up, free_right, free_down, free_left, bomb_available,
+crate_adjacent, in_danger, coin_visible, safe_bomb und movement_pattern.
+Dadurch bleiben die Features als Q-Table-Schlüssel verwendbar, sind im Trainingscode aber eindeutig benannt
+und weniger fehleranfällig als feste Tupelindizes.
+
+3.3 Die frühere Coin-spezifische Navigation wurde zu einer allgemeineren Zielnavigation erweitert.
+Agent_2_3_QL kann ein konkretes aktuelles Ziel verfolgen: sichtbare Coins besitzen Priorität;
+wenn kein Coin sichtbar ist, wird ein geeignetes Feld neben einer Kiste als Nahziel gesucht.
+Während einer Gefahrensituation wird dieses normale Ziel vorübergehend nicht verfolgt,
+sondern die Suche nach einem sicheren Feld priorisiert.
+
+3.4 Die Begehbarkeitsprüfung wurde erweitert. Ein Feld gilt nicht mehr nur dann als blockiert,
+wenn dort Wand oder Kiste liegt, sondern auch aktive Bomben und andere Agentenpositionen
+werden als nicht begehbar behandelt. Für Subgoal 2 sind insbesondere Bomben als dynamische Hindernisse relevant.
+
+4. Erweiterte Zustandsrepräsentation
+
+4.1 target_direction ersetzt die reine coin_direction aus Agent_1_2_QL.
+Das Merkmal beschreibt weiterhin nur die Richtung des ersten Schrittes zu einem aktuellen Ziel
+und nicht dessen absolute Position. Das Ziel kann jetzt jedoch ein Coin, ein geeignetes Kistenfeld
+oder ein sicherer Fluchtpunkt sein.
+
+4.2 bomb_available speichert, ob der Agent aktuell überhaupt eine Bombe legen darf.
+Dieses Feature ist notwendig, weil BOMB nicht in jedem Schritt physisch möglich ist und die Q-Tabelle ansonsten
+Situationen mit und ohne verfügbare Bombe nicht unterscheiden könnte.
+
+4.3 crate_adjacent beschreibt, ob direkt neben der aktuellen Position mindestens eine Kiste liegt.
+Dadurch kann der Agent lernen, dass ein Bombenwurf in unmittelbarer Kistennähe einen anderen Nutzen
+besitzt als ein Bombenwurf auf freiem Feld.
+
+4.4 in_danger zeigt an, ob die aktuelle Agentenposition in einem bekannten Bomben- oder Explosionsbereich liegt.
+Dieses Feature ermöglicht eine klare Trennung zwischen normalem Navigationsverhalten und Fluchtverhalten.
+
+4.5 coin_visible zeigt an, ob momentan mindestens ein freigelegter Coin sichtbar ist.
+Damit kann die Q-Tabelle Situationen unterscheiden, in denen ein bereits sichtbarer Coin verfolgt werden kann,
+von Situationen, in denen zunächst Kisten geöffnet werden müssen.
+
+4.6 safe_bomb beschreibt, ob nach einem hypothetischen eigenen Bombenwurf innerhalb der verfügbaren Zeit
+ein Feld außerhalb aller bekannten Gefahrenbereiche erreichbar wäre.
+
+4.7 movement_pattern kodiert problematische Bewegungsmuster.
+Die Werte unterscheiden normales Verhalten, eine beginnende Zwei-Feld-Oszillation, Stillstand und
+einen länger anhaltenden lokalen Zwei-Feld-Loop.
+Damit kann die Q-Tabelle identische räumliche Situationen unterschiedlich bewerten, je nachdem,
+ob der Agent gerade tatsächlich Fortschritt macht oder bereits in einem Bewegungsmuster festhängt.
+
+4.8 Bewusst nicht als Feature aufgenommen wurde eine konkrete Distanz zum Ziel.
+Frühere Zwischenstände zeigten, dass zusätzliche konkrete Distanzwerte die Zustandsmenge stark vergrößern
+und die Generalisierung verschlechtern können. Die Distanz wird daher nur für Reward Shaping berechnet,
+nicht als Bestandteil des Q-Table-Zustands gespeichert.
+
+5. Neu eingeführte bzw. verallgemeinerte Funktionen in callbacks.py
+
+5.1 valid_actions_from_state():
+Erzeugt aus den Zustandsfeatures die Menge der physisch ausführbaren Aktionen.
+Bewegungen auf blockierte Felder werden nicht zur Auswahl angeboten, WAIT bleibt möglich und BOMB wird
+nur bei verfügbarer Bombe zugelassen.
+
+5.2 detect_movement_pattern():
+Analysiert die letzten Positionen des Agenten und erkennt A→B→A-Oszillationen, längeren Stillstand
+sowie länger anhaltende Bewegungen auf nur zwei Feldern.
+
+5.3 distance_to_target():
+Bestimmt die BFS-Distanz zum aktuell relevanten Nahziel.
+Die Distanz wird ausschließlich für Zwischenrewards verwendet und bewusst nicht in die Zustandsrepräsentation aufgenommen.
+
+5.4 get_target_direction_and_distance():
+Bündelt die Zielpriorisierung. Befindet sich der Agent in Gefahr, wird die Richtung zur Sicherheit berechnet;
+existiert ein festes aktuelles Ziel, wird dieses verfolgt; andernfalls wird zu einem sichtbaren Coin oder
+zu einer geeigneten Kistenposition navigiert.
+
+5.5 has_adjacent_crate():
+Prüft, ob sich neben einer Position eine zerstörbare Kiste befindet.
+
+5.6 bfs_target_position():
+Sucht per Breitensuche eine konkrete erreichbare Zielposition, die eine übergebene Zielbedingung erfüllt.
+
+5.7 update_current_target():
+Verwaltet ein persistentes Nahziel über mehrere Schritte.
+Sichtbare Coins werden priorisiert und vorhandene Ziele möglichst beibehalten;
+ohne sichtbaren Coin wird eine erreichbare Position neben einer Kiste gewählt,
+von der bei verfügbarer Bombe auch ein sicherer Fluchtweg existieren soll.
+
+5.8 bfs_target():
+Verallgemeinert die ursprüngliche Coin-BFS aus Agent_1_2_QL.
+Die Funktion liefert sowohl die Richtung des ersten Schrittes als auch die Distanz zu einem beliebigen Zielkriterium
+und kann bekannte Gefahrenfelder wahlweise als Hindernisse behandeln.
+
+5.9 direction_to_coin():
+Verwendet die generische BFS, um den ersten Schritt zum nächsten sichtbaren Coin zu bestimmen.
+
+5.10 direction_to_crate():
+Sucht nicht die Kiste selbst als begehbares Ziel, sondern das nächste freie Feld, das an eine Kiste angrenzt.
+
+5.11 direction_to_safety():
+Sucht vom aktuellen Standort aus das nächste Feld außerhalb der bekannten Gefahrenmenge.
+Diese Richtung wird verwendet, sobald in_danger aktiv ist, sodass Fluchtverhalten gegenüber der
+normalen Zielnavigation priorisiert werden kann.
+
+5.12 direction_to_position():
+Berechnet Richtung und Distanz zu einer bereits ausgewählten konkreten Zielposition.
+
+5.13 get_blast_coords():
+Berechnet die Explosionsfelder einer Bombe analog zur Spielmechanik.
+
+5.14 compute_danger_tiles():
+Vereinigt aktuell aktive Explosionsfelder mit den zukünftigen Explosionsradien aller bereits gelegten Bomben.
+Das Ergebnis dient als zentrale Gefahrenkarte für Navigation, Flucht und Sicherheitsprüfung.
+
+5.15 can_escape_bomb_from_position():
+Simuliert für eine beliebige Startposition einen hypothetischen Bombenwurf und prüft per BFS,
+ob innerhalb der verfügbaren Schritte ein Feld außerhalb der kombinierten Gefahrenzone erreichbar ist.
+Diese Funktion ist die Grundlage dafür, riskante Bombenpositionen von tatsächlich überlebbaren Bombenpositionen zu unterscheiden.
+
+5.16 can_escape_own_bomb():
+Wendet die allgemeine Fluchtwegprüfung auf die aktuelle Position des Agenten an und liefert damit das Feature safe_bomb.
+
+
+
+6. Probleme während der Entwicklung von Agent_2_1_QL und Agent_2_2_QL
+
+6.1 Die ersten Subgoal-2-Versionen zeigten, dass das reine Hinzufügen der Aktion BOMB und
+einiger Bombenfeatures nicht ausreichte.
+Agent_2_1_QL lernte zwar, aktiv Bomben zu legen und Kisten zu zerstören, brachte sich dabei aber noch zu häufig
+mit den eigenen Bomben um.
+Hauptproblem war, dass „Bombe sinnvoll“ und „Bombe sicher“ noch nicht zuverlässig voneinander getrennt wurden.
+
+6.2 Ein weiterer Fehler lag in der Gefahrenerkennung:
+Kisten wurden zeitweise fälschlicherweise als Ende des Explosionsradius behandelt.
+Dadurch hielt der Agent Positionen hinter einer Kiste für sicher, obwohl die tatsächliche Spielmechanik dort
+weiterhin eine Explosion zulässt. Diese Abweichung zwischen Feature-Berechnung und Umgebung führte zu
+vermeidbaren Selbsttötungen.
+
+6.3 Bei der Erweiterung des Zustands wurden in den Zwischenversionen teilweise feste Tupelindizes verwendet.
+Sobald Features ergänzt oder ihre Reihenfolge verändert wurden, konnten Trainingslogik und Zustandsrepräsentation auseinanderlaufen.
+Agent_2_3_QL behebt dieses Wartbarkeitsproblem durch das benannte StateFeatures-Tupel.
+
+6.4 Agent_2_2_QL zeigte besonders starke Schleifenprobleme.
+Der Agent bewegte sich häufig dauerhaft zwischen zwei Feldern hin und her,
+ohne ein Ziel tatsächlich zu erreichen.
+Mehrere einfache Strafansätze reichten zunächst nicht aus, weil eine einzelne Richtungsänderung nicht zuverlässig
+zwischen normalem Navigieren, notwendigem Ausweichen und einem echten lokalen Loop unterscheidet.
+
+6.5 Versuche, die Zustandsrepräsentation durch zusätzliche konkrete Informationen wie Distanzen zu erweitern,
+führten außerdem zu einer stark wachsenden Zahl möglicher Zustände.
+Dadurch ging ein Teil der in Agent_1_2_QL erreichten Generalisierung verloren:
+Der Agent musste ähnliche Situationen häufiger separat lernen, anstatt sie über
+denselben abstrakten Zustand wiederzuverwenden.
+
+6.6 Zu starke oder falsch platzierte Loop- und Sicherheitsstrafen konnten neues Fehlverhalten erzeugen.
+Insbesondere durfte ein notwendiges Ausweichen vor einer Bombe nicht als Oszillation bestraft werden,
+und Sicherheitslogik durfte nicht dazu führen, dass der Agent lieber in einer Sackgasse wartet oder unnötig
+riskante Bewegungen wählt. In Agent_2_3_QL werden Loop-Strafen deshalb nur unter zusätzlichen Bedingungen angewendet,
+insbesondere außerhalb akuter Gefahr und ohne aktive Bombensituation.
+
+6.7 Die Zwischenversionen Agent_2_1_QL und Agent_2_2_QL wurden wegen der extrem starken Ausprägung dieser Fehler
+bewusst nicht als eigene Versionen hochgeladen. Sie waren wichtige experimentelle Entwicklungsschritte, stellten
+aber keinen stabilen Stand dar: Agent_2_1_QL litt insbesondere unter häufigen Selbsttötungen, Agent_2_2_QL
+zusätzlich unter ausgeprägten Zwei-Feld-Loops. Die daraus gewonnenen Erkenntnisse wurden stattdessen in
+Agent_2_3_QL zusammengeführt.
+
+
+7. Maßnahmen in Agent_2_3_QL gegen die zuvor beobachteten Fehler
+
+7.1 Gegen häufige Selbsttötungen wurden mehrere Ebenen kombiniert:
+korrekte Berechnung der Bombenradien, ein explizites in_danger-Feature, die Suche nach dem nächsten
+sicheren Feld, die Vorabprüfung eines Fluchtwegs für hypothetische eigene Bomben und deutlich negative
+Rewards für KILLED_SELF sowie unsichere Bombenwürfe.
+
+7.2 Gegen Zwei-Feld-Loops wurde nicht nur eine zusätzliche Strafe vergeben, sondern zunächst
+eine eigene Mustererkennung eingeführt. Dadurch kann der Agent zwischen einer einzelnen Rückbewegung
+und einem über mehrere Zustände stabilen lokalen Loop unterscheiden.
+Das Merkmal movement_pattern wird Teil des Zustands, sodass Q-Learning die gleiche geometrische Situation
+abhängig vom bisherigen Bewegungsverlauf unterschiedlich bewerten kann.
+
+7.3 Gegen häufig wechselnde Navigationsziele wurde ein persistentes
+current_target_position/current_target_kind eingeführt.
+Ein Coin- oder Kistenziel bleibt erhalten, solange es gültig ist.
+Dies reduziert Zielwechsel, die zuvor selbst wieder Oszillationen begünstigen konnten.
+
+7.4 Gegen die Vergrößerung des Zustandsraums wurde die Distanz bewusst aus den Q-Features entfernt.
+Sie bleibt als temporäre Trainingsinformation für progress-based Rewards erhalten.
+Damit verbindet Agent_2_3_QL reichhaltigere Sicherheitsinformationen mit der weiterhin
+positionsunabhängigen Generalisierung von Agent_1_2_QL.
+
+7.5 Gegen ungültige Aktionsauswahl wurde valid_actions_from_state ergänzt.
+Wichtig ist dabei, dass dies lediglich unmögliche Aktionen maskiert und keine strategische Aktion fest vorgibt.
+Die eigentliche Auswahl zwischen den gültigen Bewegungen, WAIT und einer verfügbaren Bombe
+erfolgt weiterhin anhand der gelernten Q-Werte beziehungsweise während des Trainings über ε-greedy Exploration.

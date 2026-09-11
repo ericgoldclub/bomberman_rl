@@ -7,7 +7,6 @@ from fallbacks import pygame
 # board size (a smaller board may be useful at the beginning)
 COLS = 17
 ROWS = 17
-COIN_COUNT = 50
 SCENARIOS = {
     # modes useful for agent development
 	"empty": {
@@ -16,25 +15,33 @@ SCENARIOS = {
     },
     "coin-heaven": {
         "CRATE_DENSITY": 0,
-        "COIN_COUNT": 9
+        "COIN_COUNT": 50
     },
+    "coin-heaven-9": {
+            "CRATE_DENSITY": 0,
+            "COIN_COUNT": 9
+        },
     "loot-crate": {
         "CRATE_DENSITY": 0.75,
-        "COIN_COUNT": 9
+        "COIN_COUNT": 50
     },
-     "loot-crate30": {
-            "CRATE_DENSITY": 0.3,
-            "COIN_COUNT": COIN_COUNT
+    "loot-crate15": {
+        "CRATE_DENSITY": 0.15,
+        "COIN_COUNT": 50
         },
-     "loot-crate75": {
-            "CRATE_DENSITY": 0.75,
-            "COIN_COUNT": COIN_COUNT
+    "loot-crate30": {
+        "CRATE_DENSITY": 0.30,
+        "COIN_COUNT": 50
+        },
+    "loot-crate75": {
+        "CRATE_DENSITY": 0.75,
+        "COIN_COUNT": 50
         },
     # this is the tournament game mode
     "classic": {
         "CRATE_DENSITY": 0.75,
         "COIN_COUNT": 9
-    }
+    },
     # Feel free to add more game modes and properties
     # game is created in environment.py -> BombeRLeWorld -> build_arena()
 }
@@ -44,7 +51,7 @@ MAX_AGENTS = 4
 DEFAULT_TRAINING_GAMES = 50_000
 
 # Round properties
-MAX_STEPS = 400
+MAX_STEPS = 600
 
 # GUI properties
 GRID_SIZE = 30

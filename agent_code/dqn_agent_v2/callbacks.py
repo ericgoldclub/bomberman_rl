@@ -361,11 +361,11 @@ def _bomb_is_unsafe(game_state: dict) -> bool:
 
 
 def _policy_action_mask(game_state: dict) -> np.ndarray:
-    """Return the action mask used by the DQN policy."""
-    mask = np.array([_is_valid_action(game_state, action) for action in ACTIONS], dtype=bool)
-    if game_state is not None and mask[ACTIONS.index('BOMB')] and _bomb_is_unsafe(game_state):
-        mask[ACTIONS.index('BOMB')] = False
-    return mask
+    """Mask only actions that are illegal under the game rules."""
+    return np.array(
+        [_is_valid_action(game_state, action) for action in ACTIONS],
+        dtype=bool,
+    )
 
 def _feature_dimensions() -> tuple:
     """Return (grid_channels, scalar_size) from the fixed constants."""

@@ -22,6 +22,8 @@ from .callbacks import (
     _feature_dimensions,
     _is_valid_action,
     _policy_action_mask,
+    _bomb_targets_enemy,
+    _bomb_traps_enemy,
 )
 
 import events as e
@@ -39,7 +41,7 @@ BEST_MODEL_FILE = os.path.join(
 
 PRETRAINED_MODEL_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-coin.pt",
+    "dqn-pretrained-model.pt",
 )
 REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
@@ -47,7 +49,7 @@ REPLAY_BUFFER_FILE = os.path.join(
 )
 PRETRAINED_REPLAY_BUFFER_FILE = os.path.join(
     AGENT_DIRECTORY,
-    "dqn-coin-buffer.pkl",
+    "dqn-pretrained-buffer.pkl",
 )
 
 TRAINING_START_MODES = {"fresh", "resume", "transfer"}
@@ -102,9 +104,35 @@ class ReplayBuffer:
         for transition in transitions:
             self.append(transition)
 
-    def sample(self, sample_size: int, exclude_latest: bool = False):
+    def sample(
+        self,
+        sample_size: int,
+        exclude_latest: bool = False,
+        priority_predicate=None,
+        priority_fraction: float = 0.0,
+    ):
         population_size = len(self) - int(exclude_latest)
-        indices = random.sample(range(population_size), sample_size)
+        population = list(range(population_size))
+
+        priority_count = 0
+        priority_indices = []
+        if priority_predicate is not None and priority_fraction > 0.0:
+            priority_indices = [
+                index
+                for index in population
+                if priority_predicate(self[index])
+            ]
+            priority_count = min(
+                len(priority_indices),
+                sample_size,
+                max(1, int(round(sample_size * priority_fraction))),
+            )
+
+        indices = random.sample(priority_indices, priority_count)
+        selected = set(indices)
+        remaining = [index for index in population if index not in selected]
+        indices.extend(random.sample(remaining, sample_size - priority_count))
+        random.shuffle(indices)
         return [self[index] for index in indices]
 
 
@@ -137,13 +165,13 @@ HYPERPARAMS_FILE = os.path.join(os.path.dirname(__file__), "Hyperparams.prm")
 
 
 
-CHECKPOINT_VERSION = 5
-MODEL_ARCHITECTURE = "HytbridDQN-v5-light-spatial-attention"
+CHECKPOINT_VERSION = 6
+MODEL_ARCHITECTURE = "DQN-prev-v2-rf17-dueling"
 REPLAY_BUFFER_VERSION = 5
 REPLAY_SAVE_EVERY_ROUNDS = 150
 
 FEATURE_VERSION = 2
-REWARD_VERSION = 2
+REWARD_VERSION = 3
 
 OBSOLETE_BEST_MODEL_KEYS = {
     "BEST_MODEL_ENEMIES_KILLED",
@@ -153,8 +181,12 @@ OBSOLETE_BEST_MODEL_KEYS = {
 }
 
 SUICIDE_REWARD = -2.0
+KILLER_REPLAY_SIGNAL_THRESHOLD = 3.0
+KILLER_REPLAY_SIGNAL_FRACTION = 0.25
+KILLER_SELECTION_KILL_WEIGHT = 300.0
+KILLER_SELECTION_SUICIDE_WEIGHT = 25.0
 
-from .Networks import HybridDQN as DQN_net
+from .Networks import DQN_prev as DQN_net
 
 MAJOR_REWARDS = {
     e.COIN_COLLECTED: 1.0,
@@ -220,20 +252,27 @@ REWARD_PROFILES = {
     "killer": {
             "major_rewards": {
                 **MAJOR_REWARDS,
-                e.KILLED_OPPONENT: 6.5,
-                e.GOT_KILLED: -5.0,
-                e.COIN_FOUND: 0.05,
-                e.CRATE_DESTROYED: 0.01,
-                e.BOMB_DROPPED: 0.05,
+                e.COIN_COLLECTED: 0.15,
+                e.KILLED_OPPONENT: 10.0,
+                e.GOT_KILLED: -4.0,
+                e.SURVIVED_ROUND: 0.75,
+                e.COIN_FOUND: 0.0,
+                e.CRATE_DESTROYED: 0.02,
+                e.BOMB_DROPPED: 0.0,
+                e.BOMB_EXPLODED: 0.15,
+                e.KILL_BOMB_DROPPED: 0.75,
+                e.ENEMY_PRESSURE_BOMB_DROPPED: 0.20,
             },
             "shaping_rewards": {
-                e.REVERSED_DIRECTION: -0.015,
-                e.IN_DANGER: -0.085,
-                e.WAITED: -0.015,
+                e.REVERSED_DIRECTION: -0.01,
+                e.IN_DANGER: -0.10,
+                e.WAITED: -0.02,
+                e.MOVED_CLOSE_TO_ENEMY: 0.04,
+                e.MOVED_AWAY_FROM_ENEMY: -0.02,
             },
-            "suicide_reward": -3.0,
-            "step_time_cost": 0.0,
-            "shaping_clip": 0.1,
+            "suicide_reward": -6.0,
+            "step_time_cost": 0.002,
+            "shaping_clip": 0.15,
         },
 }
 
@@ -344,7 +383,10 @@ def _save_hyperparameters(self) -> None:
     runtime_updates = {
         "EPSILON_LAST": f"{self.epsilon_current:.10f}",
         "STEPS_DONE": f"{int(self.steps_done)}",
-        "BEST_MODEL_SCORE": f"{float(self.best_score):.1f}",
+        "BEST_MODEL_SCORE": f"{float(self.best_score):.5f}",
+        "BEST_MODEL_MEAN_GAME_SCORE": (
+            f"{self.best_mean_game_score:.5f}"
+        ),
         "BEST_MODEL_COINS_COLLECTED": (
             f"{self.best_mean_coins_collected:.5f}"
         ),
@@ -405,6 +447,7 @@ def _save_latest_checkpoint(self) -> None:
         "checkpoint_version": CHECKPOINT_VERSION,
         "model_architecture": MODEL_ARCHITECTURE,
         "reward_profile": self.reward_profile_name,
+        "reward_version": REWARD_VERSION,
         "policy_state_dict": self.policy_net.state_dict(),
         "target_state_dict": self.target_net.state_dict(),
         "optimizer_state_dict": self.optimizer.state_dict(),
@@ -412,6 +455,7 @@ def _save_latest_checkpoint(self) -> None:
         "gradient_steps": int(self.gradient_steps),
         "epsilon_current": float(self.epsilon_current),
         "best_score": float(self.best_score),
+        "best_mean_game_score": float(self.best_mean_game_score),
         "best_mean_coins_collected": float(
             self.best_mean_coins_collected
         ),
@@ -445,7 +489,9 @@ def _save_latest_checkpoint(self) -> None:
         "training_rounds_since_evaluation": int(
             self._training_rounds_since_evaluation
         ),
-        "best_model_metric": "mean_game_score",
+        "best_model_metric": _model_selection_metric_name(
+            self.reward_profile_name
+        ),
 
     }
 
@@ -480,6 +526,15 @@ def _restore_latest_checkpoint(self) -> None:
             "Checkpoint reward profile is incompatible with resume mode: "
             f"stored={stored_reward_profile!r} "
             f"current={self.reward_profile_name!r}. Use transfer or fresh mode."
+        )
+
+    stored_reward_version = int(checkpoint.get("reward_version", 2))
+    if stored_reward_version != REWARD_VERSION:
+        raise RuntimeError(
+            "Checkpoint reward version is incompatible: "
+            f"stored={stored_reward_version} current={REWARD_VERSION}. "
+            "Use transfer mode to keep the policy weights while starting "
+            "new optimizer and replay state."
         )
 
     if tuple(checkpoint.get("actions", ())) != tuple(ACTIONS):
@@ -525,10 +580,10 @@ def _restore_latest_checkpoint(self) -> None:
         )
     )
 
-    # Older checkpoints also stored an adjusted selection score. The raw
-    # best_score has always represented mean environment game score, so it is
-    # safe to retain while dropping the obsolete stacked criterion.
-    self.best_score = float(checkpoint.get("best_score", -1.0))
+    self.best_score = float(checkpoint.get("best_score", -1.0e12))
+    self.best_mean_game_score = float(
+        checkpoint.get("best_mean_game_score", self.best_score)
+    )
     if "best_mean_coins_collected" in checkpoint:
         self.best_mean_coins_collected = float(
             checkpoint["best_mean_coins_collected"]
@@ -555,6 +610,24 @@ def _restore_latest_checkpoint(self) -> None:
     self.best_mean_time_left = float(
         checkpoint.get("best_mean_time_left", 0.0)
     )
+
+    expected_metric = _model_selection_metric_name(self.reward_profile_name)
+    stored_metric = checkpoint.get("best_model_metric", "mean_game_score")
+    if stored_metric != expected_metric:
+        self.logger.warning(
+            "Resetting best-model baseline because the selection metric "
+            "changed from %s to %s.",
+            stored_metric,
+            expected_metric,
+        )
+        self.best_score = -1.0e12
+        self.best_mean_game_score = 0.0
+        self.best_mean_coins_collected = 0.0
+        self.best_mean_enemies_killed = 0.0
+        self.best_suicide_rate = 1.0
+        self.best_mean_crates_destroyed = 0.0
+        self.best_completion_rate = 0.0
+        self.best_mean_time_left = 0.0
 
 
 
@@ -672,10 +745,19 @@ def _load_replay_buffer(
             f"current={FEATURE_VERSION}."
         )
 
-    if payload.get("reward_version") != REWARD_VERSION:
+    stored_reward_version = int(payload.get("reward_version", -1))
+    training_start_mode = getattr(self, "training_start_mode", "resume")
+    compatible_transfer_versions = {2, REWARD_VERSION}
+    if (
+        stored_reward_version != REWARD_VERSION
+        and not (
+            training_start_mode == "transfer"
+            and stored_reward_version in compatible_transfer_versions
+        )
+    ):
         raise RuntimeError(
             "Replay-buffer reward version is incompatible: "
-            f"stored={payload.get('reward_version')} "
+            f"stored={stored_reward_version} "
             f"current={REWARD_VERSION}."
         )
 
@@ -790,6 +872,35 @@ def _advance_epsilon(self) -> None:
 
     self.epsilon_current = float(self.epsilon_end + (self.epsilon_current - self.epsilon_end)* decay_factor)
 
+
+def _model_selection_metric_name(reward_profile_name: str) -> str:
+    """Name the metric used to promote a greedy evaluation checkpoint."""
+    if reward_profile_name == "killer":
+        return "killer_eliminations_survival_score_v1"
+    return "mean_game_score"
+
+
+def _model_selection_score(
+    reward_profile_name: str,
+    mean_game_score: float,
+    mean_enemies_killed: float,
+    suicide_rate: float,
+) -> float:
+    """Return a profile-aware checkpoint score.
+
+    One additional observed kill in a 30-round evaluation contributes more
+    than a full nine-coin swing, while repeated suicides can still outweigh a
+    lucky trade kill.  Non-killer profiles retain tournament game score.
+    """
+    if reward_profile_name != "killer":
+        return float(mean_game_score)
+
+    return float(
+        KILLER_SELECTION_KILL_WEIGHT * mean_enemies_killed
+        - KILLER_SELECTION_SUICIDE_WEIGHT * suicide_rate
+        + mean_game_score
+    )
+
 def _complete_evaluation_block(self) -> None:
     """Evaluate the candidate policy over the completed greedy rounds."""
     if not self._evaluation_results:
@@ -857,6 +968,12 @@ def _complete_evaluation_block(self) -> None:
     mean_enemies_killed = (
         total_enemies_killed / len(self._evaluation_results)
     )
+    selection_score = _model_selection_score(
+        self.reward_profile_name,
+        mean_game_score,
+        mean_enemies_killed,
+        suicide_rate,
+    )
     
 
     if completed_times:
@@ -868,21 +985,22 @@ def _complete_evaluation_block(self) -> None:
         "Greedy evaluation completed: "
         "mean_game_score=%.3f mean_crates_destroyed=%.3f suicide_rate=%.3f "
         "mean_enemies_killed=%.3f completion_rate=%.3f mean_time_left=%.1f "
-        "over %d rounds.",
+        "selection_metric=%s selection_score=%.3f over %d rounds.",
         mean_game_score,
         mean_crates_destroyed,
         suicide_rate,
         mean_enemies_killed,
         completion_rate,
         mean_time_left,
+        _model_selection_metric_name(self.reward_profile_name),
+        selection_score,
         len(self._evaluation_results),
     )
 
-    # Game score already includes coins and opponent kills. Select on that
-    # tournament objective exactly once; all other values are diagnostics.
-    if mean_game_score > self.best_score:
+    if selection_score > self.best_score:
         previous_best_score = self.best_score
-        self.best_score = mean_game_score
+        self.best_score = selection_score
+        self.best_mean_game_score = mean_game_score
         self.best_mean_coins_collected = mean_coins_collected
         self.best_mean_enemies_killed = mean_enemies_killed
         self.best_suicide_rate = suicide_rate
@@ -896,15 +1014,17 @@ def _complete_evaluation_block(self) -> None:
         )
 
         self.logger.info(
-            "Saved new best model: mean_game_score improved from %.3f to %.3f.",
+            "Saved new best model: %s improved from %.3f to %.3f.",
+            _model_selection_metric_name(self.reward_profile_name),
             previous_best_score,
-            mean_game_score,
+            selection_score,
         )
 
     else:
         self.logger.info(
-            "Candidate mean_game_score %.3f did not improve best %.3f.",
-            mean_game_score,
+            "Candidate %s %.3f did not improve best %.3f.",
+            _model_selection_metric_name(self.reward_profile_name),
+            selection_score,
             self.best_score,
         )
 
@@ -953,7 +1073,8 @@ def setup_training(self):
 
     # Define safe defaults before checkpoint restoration. In resume mode,
     # _restore_latest_checkpoint() replaces these values with the saved ones.
-    self.best_score = -1.0
+    self.best_score = -1.0e12
+    self.best_mean_game_score = 0.0
     self.best_mean_coins_collected = 0.0
     self.best_mean_enemies_killed = 0.0
     self.best_suicide_rate = 1.0
@@ -1007,7 +1128,7 @@ def setup_training(self):
 
         _load_replay_buffer(
             self,
-            max_transitions=5_000,
+            max_transitions=15_000,
             replay_path=pretrained_replay_path,
         )
 
@@ -1063,6 +1184,15 @@ def optimize_model(self):
     batch = self.replay_buffer.sample(
         self.batch_size,
         exclude_latest=exclude_latest,
+        priority_predicate=(
+            lambda transition: abs(float(transition.reward))
+            >= KILLER_REPLAY_SIGNAL_THRESHOLD
+        ) if self.reward_profile_name == "killer" else None,
+        priority_fraction=(
+            KILLER_REPLAY_SIGNAL_FRACTION
+            if self.reward_profile_name == "killer"
+            else 0.0
+        ),
     )
 
 
@@ -1295,6 +1425,63 @@ def optimize_model(self):
 
     return loss_value
 
+
+def _append_killer_events(
+    self,
+    old_game_state: dict | None,
+    self_action: str,
+    new_game_state: dict | None,
+    events: List[str],
+) -> None:
+    """Add low-magnitude pursuit and bomb-quality signals for killer runs."""
+    if (
+        self.reward_profile_name != "killer"
+        or old_game_state is None
+        or new_game_state is None
+    ):
+        return
+
+    if self_action == "BOMB" and e.BOMB_DROPPED in events:
+        if _bomb_targets_enemy(new_game_state):
+            if _bomb_traps_enemy(new_game_state):
+                events.append(e.KILL_BOMB_DROPPED)
+            else:
+                events.append(e.ENEMY_PRESSURE_BOMB_DROPPED)
+        return
+
+    # Reward deliberate pursuit only while no bomb is active.  Once bombs are
+    # present, moving away from an enemy may be the necessary escape action.
+    if (
+        self_action not in ACTIONS[:4]
+        or old_game_state.get("bombs")
+        or new_game_state.get("bombs")
+    ):
+        return
+
+    enemies = [
+        other[-1]
+        for other in old_game_state.get("others", ())
+        if other[-1] is not None
+    ]
+    if not enemies:
+        return
+
+    old_position = old_game_state["self"][-1]
+    new_position = new_game_state["self"][-1]
+    old_distance = min(
+        abs(enemy[0] - old_position[0]) + abs(enemy[1] - old_position[1])
+        for enemy in enemies
+    )
+    new_distance = min(
+        abs(enemy[0] - new_position[0]) + abs(enemy[1] - new_position[1])
+        for enemy in enemies
+    )
+
+    if new_distance < old_distance:
+        events.append(e.MOVED_CLOSE_TO_ENEMY)
+    elif new_distance > old_distance:
+        events.append(e.MOVED_AWAY_FROM_ENEMY)
+
 def game_events_occurred(
     self,
     old_game_state: dict,
@@ -1381,6 +1568,14 @@ def game_events_occurred(
 
             self.previous_old_position = old_pos
             self.previous_velocity = current_velocity
+
+        _append_killer_events(
+            self,
+            old_game_state,
+            self_action,
+            new_game_state,
+            events,
+        )
 
     # ------------------------------------------------------------
     # Calculate reward

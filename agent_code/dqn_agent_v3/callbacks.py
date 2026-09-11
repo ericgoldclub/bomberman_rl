@@ -11,7 +11,10 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 AGENT_DIRECTORY = os.path.dirname(__file__)
 
-BEST_MODEL_FILE = os.path.join(AGENT_DIRECTORY, "dqn-current-best-model.pt")
+BEST_MODEL_FILE = os.path.join(
+    AGENT_DIRECTORY,
+    "dqn-current-best-model.pt",
+)
 
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
 NAVIGATION_DIRECTIONS = len(DIRECTIONS)
@@ -148,6 +151,8 @@ def setup(self):
             load_path = BEST_MODEL_FILE
         elif os.path.isfile(LATEST_CHECKPOINT_FILE):
             load_path = LATEST_CHECKPOINT_FILE
+        elif os.path.isfile(PRETRAINED_MODEL_FILE):
+            load_path = PRETRAINED_MODEL_FILE
         else:
             load_path = None
 
@@ -193,12 +198,12 @@ def setup(self):
             if self.train and self.training_start_mode == "transfer":
                 raise RuntimeError(
                     f"Could not transfer model from {load_path}: {incompatibility}. "
-                    "HybridDQN requires a HybridDQN checkpoint."
+                    "DQN_prev requires a compatible DQN_prev checkpoint."
                 )
 
             self.logger.warning(
                 "Ignoring incompatible model at %s (%s); starting with freshly "
-                "initialized HybridDQN weights.",
+                "initialized DQN_prev weights.",
                 load_path,
                 incompatibility,
             )
@@ -237,7 +242,7 @@ def setup(self):
 
     elif not self.train:
         self.logger.warning(
-            "No best or latest model exists; using random weights."
+            "No best, latest, or pretrained model exists; using random weights."
         )
 
 
@@ -275,7 +280,13 @@ def _is_valid_action(game_state: dict, action: str) -> bool:
 
 
 def _blast_positions(field, x, y, power):
-    """Return all cells affected by a bomb placed at (x, y)."""
+    """Return all cells affected by a bomb placed at (x, y).
+
+    This environment's blast implementation only stops at indestructible
+    walls; it continues through crates.  Keep this helper aligned with
+    ``items.Bomb.get_blast_coords`` because it is also used by the safety mask
+    and the killer reward shaping.
+    """
     blast = {(x, y)}
     for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
         for step in range(1, power + 1):
@@ -288,48 +299,135 @@ def _blast_positions(field, x, y, power):
     return blast
 
 
-def _bomb_has_escape_route(game_state: dict) -> bool:
-    """Return whether a newly placed bomb leaves time to exit its blast."""
+def _build_hazard_timeline(
+    field,
+    bombs,
+    explosion_map,
+    horizon=s.BOMB_TIMER + 2,
+):
+    """Return the blast tiles reached after each future action."""
+    hazards = {step: set() for step in range(horizon + 1)}
+
+    for x, y in np.argwhere(explosion_map > 0):
+        remaining_steps = int(np.ceil(explosion_map[x, y]))
+        for step in range(1, min(remaining_steps, horizon) + 1):
+            hazards[step].add((int(x), int(y)))
+
+    for bomb_position, timer in bombs:
+        explosion_step = int(timer) + 1
+        blast = _blast_positions(
+            field,
+            bomb_position[0],
+            bomb_position[1],
+            s.BOMB_POWER,
+        )
+        # An explosion is dangerous when created and for the following action.
+        for step in (explosion_step, explosion_step + 1):
+            if 0 <= step <= horizon:
+                hazards[step].update(blast)
+
+    return hazards
+
+
+def _has_survival_path(
+    game_state: dict,
+    first_action: str | None = None,
+    place_bomb: bool = False,
+    horizon=s.BOMB_TIMER + 2,
+) -> bool:
+    """Search the time-expanded board for a safe continuation."""
     if game_state is None:
         return False
 
     field = game_state["field"]
-    _, _, _, start = game_state["self"]
-    blast = _blast_positions(field, *start, s.BOMB_POWER)
-    blocked = {
-        position
-        for position, _ in game_state.get("bombs", ())
+    start = tuple(game_state["self"][-1])
+    bombs = [
+        (tuple(position), int(timer))
+        for position, timer in game_state.get("bombs", ())
+    ]
+    if place_bomb and all(position != start for position, _ in bombs):
+        bombs.append((start, s.BOMB_TIMER))
+
+    hazards = _build_hazard_timeline(
+        field,
+        bombs,
+        game_state.get("explosion_map", np.zeros_like(field)),
+        horizon,
+    )
+    bomb_expiry = {
+        position: timer + 1
+        for position, timer in bombs
     }
-    blocked.update(
+    enemies = {
         other[-1]
         for other in game_state.get("others", ())
         if other[-1] is not None
-    )
+    }
+    start_bomb = start if start in bomb_expiry else None
 
-    frontier = deque([(start, 0)])
-    visited = {start}
+    # position, future step, whether a bomb underneath the agent was left
+    frontier = deque([(start, 0, False)])
+    visited = {(start, 0, False)}
 
     while frontier:
-        position, distance = frontier.popleft()
-        if distance > 0 and position not in blast:
+        position, time, left_start_bomb = frontier.popleft()
+        if time >= horizon:
             return True
-        if distance >= s.BOMB_TIMER:
-            continue
 
-        x, y = position
-        for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
-            neighbor = (x + dx, y + dy)
-            nx, ny = neighbor
+        if time == 0 and first_action is not None:
+            if first_action in ACTIONS[:4]:
+                candidate_directions = (DIRECTIONS[ACTIONS.index(first_action)],)
+            else:
+                candidate_directions = ((0, 0),)
+        else:
+            candidate_directions = DIRECTIONS
+
+        for dx, dy in candidate_directions:
+            next_position = (position[0] + dx, position[1] + dy)
+            next_time = time + 1
+            nx, ny = next_position
+
             if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
                 continue
-            if field[nx, ny] != 0 or neighbor in blocked:
+            if field[nx, ny] != 0:
                 continue
-            if neighbor == start or neighbor in visited:
+            if next_time == 1 and next_position in enemies:
                 continue
-            visited.add(neighbor)
-            frontier.append((neighbor, distance + 1))
+
+            next_left_start_bomb = (
+                left_start_bomb
+                or (start_bomb is not None and next_position != start_bomb)
+            )
+            expiry = bomb_expiry.get(next_position)
+            if expiry is not None and next_time <= expiry:
+                may_remain_on_start_bomb = (
+                    next_position == start_bomb and not left_start_bomb
+                )
+                if not may_remain_on_start_bomb:
+                    continue
+            if next_position in hazards[next_time]:
+                continue
+
+            search_state = (
+                next_position,
+                next_time,
+                next_left_start_bomb,
+            )
+            if search_state in visited:
+                continue
+            visited.add(search_state)
+            frontier.append(search_state)
 
     return False
+
+
+def _bomb_has_escape_route(game_state: dict) -> bool:
+    """Return whether a newly placed bomb has a timed survival route."""
+    return _has_survival_path(
+        game_state,
+        first_action="WAIT",
+        place_bomb=True,
+    )
 
 
 def _bomb_targets_enemy(game_state: dict) -> bool:
@@ -347,8 +445,71 @@ def _bomb_targets_enemy(game_state: dict) -> bool:
     )
 
 
+def _enemy_can_escape_blast(
+    game_state: dict,
+    enemy_position: tuple[int, int],
+    blast: set[tuple[int, int]],
+) -> bool:
+    """Conservatively test whether an enemy can leave a prospective blast."""
+    field = game_state["field"]
+    blocked = {
+        position
+        for position, _ in game_state.get("bombs", ())
+    }
+    blocked.update(
+        other[-1]
+        for other in game_state.get("others", ())
+        if other[-1] is not None and other[-1] != enemy_position
+    )
+
+    frontier = deque([(enemy_position, 0)])
+    visited = {enemy_position}
+
+    while frontier:
+        position, distance = frontier.popleft()
+        if distance > 0 and position not in blast:
+            return True
+        if distance >= s.BOMB_TIMER:
+            continue
+
+        x, y = position
+        for dx, dy in DIRECTIONS[:4]:
+            neighbor = (x + dx, y + dy)
+            nx, ny = neighbor
+            if not (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]):
+                continue
+            if field[nx, ny] != 0 or neighbor in blocked:
+                continue
+            if neighbor in visited:
+                continue
+            visited.add(neighbor)
+            frontier.append((neighbor, distance + 1))
+
+    return False
+
+
+def _bomb_traps_enemy(game_state: dict) -> bool:
+    """Return whether a bomb at self covers an enemy with no static escape."""
+    if game_state is None:
+        return False
+
+    field = game_state["field"]
+    _, _, _, (x, y) = game_state["self"]
+    blast = _blast_positions(field, x, y, s.BOMB_POWER)
+
+    return any(
+        enemy_position in blast
+        and not _enemy_can_escape_blast(game_state, enemy_position, blast)
+        for enemy_position in (
+            other[-1]
+            for other in game_state.get("others", ())
+            if other[-1] is not None
+        )
+    )
+
+
 def _bomb_is_unsafe(game_state: dict) -> bool:
-    """Reject bombs that are useless or leave no static escape route."""
+    """Reject bombs that are useless or leave no timed escape route."""
     if game_state is None:
         return True
 
@@ -370,11 +531,27 @@ def _bomb_is_unsafe(game_state: dict) -> bool:
 
 
 def _policy_action_mask(game_state: dict) -> np.ndarray:
-    """Mask only actions that are illegal under the game rules."""
-    return np.array(
+    """Mask illegal actions and choices without a timed survival path."""
+    legal_mask = np.array(
         [_is_valid_action(game_state, action) for action in ACTIONS],
         dtype=bool,
     )
+
+    safe_mask = legal_mask.copy()
+    for index, action in enumerate(ACTIONS):
+        if not safe_mask[index]:
+            continue
+        if action == "BOMB":
+            safe_mask[index] = not _bomb_is_unsafe(game_state)
+        else:
+            safe_mask[index] = _has_survival_path(
+                game_state,
+                first_action=action,
+            )
+
+    # In a fully trapped state, retain the legal mask so the DQN still emits a
+    # valid game action and can learn from the unavoidable terminal outcome.
+    return safe_mask if safe_mask.any() else legal_mask
 
 def _feature_dimensions() -> tuple:
     """Return (grid_channels, scalar_size) from the fixed constants."""
@@ -556,8 +733,6 @@ def state_to_features(game_state: dict, last_action_index: int | None = None) ->
                 explosion_time = float(timer)
                 if explosion_time < danger_time[nx, ny]:
                     danger_time[nx, ny] = explosion_time
-                if field[nx, ny] == 1:
-                    break
 
     danger_map = np.zeros((X, Y), dtype=np.float32)
     finite_danger_time = np.isfinite(danger_time)

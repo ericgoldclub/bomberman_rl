@@ -196,7 +196,14 @@ class AgentRunner:
     Agent callback runner (called by backend).
     """
 
-    def __init__(self, train, agent_name, code_name, result_queue):
+    def __init__(
+        self,
+        train,
+        agent_name,
+        code_name,
+        result_queue,
+        game_log_path=None,
+    ):
         self.agent_name = agent_name
         self.code_name = code_name
         self.result_queue = result_queue
@@ -223,10 +230,20 @@ class AgentRunner:
         self.wlogger.setLevel(s.LOG_AGENT_WRAPPER)
         self.fake_self.logger = logging.getLogger(self.agent_name + '_code')
         self.fake_self.logger.setLevel(s.LOG_AGENT_CODE)
-        log_dir = f'agent_code/{self.code_name}/logs/'
-        if not os.path.exists(log_dir): os.makedirs(log_dir)
-        handler = logging.FileHandler(f'{log_dir}{self.agent_name}.log', mode="w")
-        handler.setLevel(logging.DEBUG)
+        if self.code_name == "dqn_agent_v3" and game_log_path is not None:
+            # Keep the v3 agent's useful INFO records beside the corresponding
+            # game events instead of creating a second agent-specific log.
+            handler = logging.FileHandler(game_log_path, mode="a")
+            handler.setLevel(logging.INFO)
+        else:
+            log_dir = f'agent_code/{self.code_name}/logs/'
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            handler = logging.FileHandler(
+                f'{log_dir}{self.agent_name}.log',
+                mode="w",
+            )
+            handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
         handler.setFormatter(formatter)
         self.wlogger.addHandler(handler)
@@ -260,10 +277,18 @@ class AgentBackend:
     Base class connecting the agent to a callback implementation.
     """
 
-    def __init__(self, train, agent_name, code_name, result_queue):
+    def __init__(
+        self,
+        train,
+        agent_name,
+        code_name,
+        result_queue,
+        game_log_path=None,
+    ):
         self.train = train
         self.code_name = code_name
         self.agent_name = agent_name
+        self.game_log_path = game_log_path
 
         self.result_queue = result_queue
 
@@ -293,12 +318,24 @@ class SequentialAgentBackend(AgentBackend):
     AgentConnector realised in main thread (easy debugging).
     """
 
-    def __init__(self, train, agent_name, code_name):
-        super().__init__(train, agent_name, code_name, queue.Queue())
+    def __init__(self, train, agent_name, code_name, game_log_path=None):
+        super().__init__(
+            train,
+            agent_name,
+            code_name,
+            queue.Queue(),
+            game_log_path,
+        )
         self.runner = None
 
     def start(self):
-        self.runner = AgentRunner(self.train, self.agent_name, self.code_name, self.result_queue)
+        self.runner = AgentRunner(
+            self.train,
+            self.agent_name,
+            self.code_name,
+            self.result_queue,
+            self.game_log_path,
+        )
 
     def send_event(self, event_name, *event_args):
         prev_cwd = os.getcwd()
@@ -312,8 +349,21 @@ class SequentialAgentBackend(AgentBackend):
 QUIT = "quit"
 
 
-def run_in_agent_runner(train: bool, agent_name: str, code_name: str, wta_queue: mp.Queue, atw_queue: mp.Queue):
-    runner = AgentRunner(train, agent_name, code_name, atw_queue)
+def run_in_agent_runner(
+    train: bool,
+    agent_name: str,
+    code_name: str,
+    wta_queue: mp.Queue,
+    atw_queue: mp.Queue,
+    game_log_path=None,
+):
+    runner = AgentRunner(
+        train,
+        agent_name,
+        code_name,
+        atw_queue,
+        game_log_path,
+    )
     while True:
         event_name, event_args = wta_queue.get()
         if event_name == QUIT:
@@ -326,12 +376,28 @@ class ProcessAgentBackend(AgentBackend):
     AgentConnector realised by a separate process (fast and safe mode).
     """
 
-    def __init__(self, train, agent_name, code_name):
-        super().__init__(train, agent_name, code_name, mp.Queue())
+    def __init__(self, train, agent_name, code_name, game_log_path=None):
+        super().__init__(
+            train,
+            agent_name,
+            code_name,
+            mp.Queue(),
+            game_log_path,
+        )
 
         self.wta_queue = mp.Queue()
 
-        self.process = mp.Process(target=run_in_agent_runner, args=(self.train, self.agent_name, self.code_name, self.wta_queue, self.result_queue))
+        self.process = mp.Process(
+            target=run_in_agent_runner,
+            args=(
+                self.train,
+                self.agent_name,
+                self.code_name,
+                self.wta_queue,
+                self.result_queue,
+                self.game_log_path,
+            ),
+        )
 
     def start(self):
         self.process.start()

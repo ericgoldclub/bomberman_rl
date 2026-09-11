@@ -58,8 +58,16 @@ class GenericWorld:
     def setup_logging(self):
         self.logger = logging.getLogger('BombeRLeWorld')
         self.logger.setLevel(s.LOG_GAME)
-        handler = logging.FileHandler(f'{self.args.log_dir}/game.log', mode="w")
-        handler.setLevel(logging.DEBUG)
+        log_directory = Path(self.args.log_dir)
+        log_directory.mkdir(parents=True, exist_ok=True)
+        self.game_log_path = str((log_directory / 'game.log').resolve())
+
+        # Truncate once at startup. All world and agent handlers subsequently
+        # use append mode so their independent file offsets cannot overwrite
+        # one another.
+        Path(self.game_log_path).write_text('', encoding='utf-8')
+        handler = logging.FileHandler(self.game_log_path, mode="a")
+        handler.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
@@ -109,7 +117,12 @@ class GenericWorld:
         assert len(self.agents) < s.MAX_AGENTS
 
         # if self.args.single_process:
-        backend = SequentialAgentBackend(train, name, agent_dir)
+        backend = SequentialAgentBackend(
+            train,
+            name,
+            agent_dir,
+            self.game_log_path,
+        )
         # else:
         # backend = ProcessAgentBackend(train, name, agent_dir)
         backend.start()
