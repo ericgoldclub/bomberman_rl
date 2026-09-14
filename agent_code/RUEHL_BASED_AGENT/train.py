@@ -24,7 +24,7 @@ from .callbacks import (
 
 DIRECTORY = os.path.dirname(__file__)
 HYPERPARAMS_FILE = os.path.join(DIRECTORY, "Hyperparams.prm")
-REPLAY_FILE = os.path.join(DIRECTORY, "replay.pkl")
+REPLAY_FILE = os.path.join(DIRECTORY, "z_replay.pkl")
 MODEL_NAME = "ruehl-dqn-v1"
 REPLAY_SAVE_EVERY_ROUNDS = 100
 
@@ -39,7 +39,7 @@ ACTION_INDEX = {action: index for index, action in enumerate(ACTIONS)}
 BASE_REWARDS = {
     e.COIN_COLLECTED: 1.0,
     e.COIN_FOUND: 0.1,
-    e.KILLED_OPPONENT: 5.5,
+    e.KILLED_OPPONENT: 6.5,
     e.GOT_KILLED: -2.5,
 }
 
@@ -80,17 +80,20 @@ REWARD_PROFILES = {
     "killer": {
         "major": {
             **BASE_REWARDS,
-            e.COIN_COLLECTED: 0.15,
-            e.COIN_FOUND: 0.0,
-            e.KILLED_OPPONENT: 10.0,
-            e.GOT_KILLED: -4.0,
+            e.COIN_COLLECTED: 1.0,
+            e.COIN_FOUND: 0.5,
+            e.KILLED_OPPONENT: 6.0,
+            e.GOT_KILLED: -2.0,
             e.SURVIVED_ROUND: 0.75,
             e.BOMB_EXPLODED: 0.15,
             e.KILL_BOMB_DROPPED: 0.75,
+            e.CRATE_DESTROYED: 0.15,
+            e.CRATE_BOMB_DROPPED: 0.02,
         },
         "shaping": {
-            e.WAITED: -0.02,
+            e.WAITED: -0.05,
             e.IN_DANGER: -0.1,
+            e.REVERSED_DIRECTION: -0.03,
         },
         "suicide": -6.0,
         "step_cost": 0.002,
@@ -193,6 +196,8 @@ def save_checkpoint(self):
             "evaluation_round": self.evaluation_round,
             "evaluation_left": self.evaluation_left,
             "evaluation_results": self.evaluation_results,
+            "normalized_model_score": True,
+            "model_score_version": 2,
         },
         LATEST_CHECKPOINT_FILE,
     )
@@ -247,6 +252,14 @@ def setup_training(self):
             self.evaluation_round = bool(resume.get("evaluation_round", False))
             self.evaluation_left = int(resume.get("evaluation_left", 0))
             self.evaluation_results = list(resume.get("evaluation_results", []))
+            # Version 1 accidentally divided an already averaged evaluation
+            # score by eval_rounds. Repair checkpoints written by that version.
+            if (
+                resume.get("normalized_model_score", False)
+                and int(resume.get("model_score_version", 1)) < 2
+                and self.best_score > -1.0e11
+            ):
+                self.best_score *= self.eval_rounds
             load_replay(self)
     elif self.training_mode != "resume":
         reset_progress(self)
@@ -265,8 +278,6 @@ def setup_training(self):
         self.training_mode, self.reward_profile_name, len(self.memory),
         self.epsilon_current, self.steps_done, self.log_eval_events,
     )
-
-
 def pack(array):
     if array is None:
         return None
@@ -441,7 +452,7 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
 
 def model_score(profile, mean_game_score, mean_kills, suicide_rate):
     if profile == "killer":
-        return mean_game_score + 300.0 * mean_kills - 25.0 * suicide_rate
+        return mean_game_score + 5.0 * mean_kills - 5.0 * suicide_rate
     return mean_game_score
 
 
@@ -458,7 +469,9 @@ def complete_evaluation(self):
     mean_time_left = sum(completed_times) / len(completed_times) if completed_times else 0.0
     suicide_rate = mean("suicided")
     mean_crates = mean("crates")
-    score = model_score(self.reward_profile_name, mean_game_score, mean_kills, suicide_rate)
+    score = model_score(
+        self.reward_profile_name, mean_game_score, mean_kills, suicide_rate
+    )
 
     self.logger.info(
         "Evaluation: score=%.2f kills=%.2f coins=%.2f suicides=%.2f selection=%.2f",

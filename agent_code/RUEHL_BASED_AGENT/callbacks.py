@@ -18,9 +18,9 @@ TOTAL_COINS = int(
 )
 
 DIRECTORY = os.path.dirname(__file__)
-BEST_MODEL_FILE = os.path.join(DIRECTORY, "best-model.pt")
-LATEST_CHECKPOINT_FILE = os.path.join(DIRECTORY, "latest-checkpoint.pt")
-PRETRAINED_MODEL_FILE = os.path.join(DIRECTORY, "pretrained-model.pt")
+BEST_MODEL_FILE = os.path.join(DIRECTORY, "z_best-model.pt")
+LATEST_CHECKPOINT_FILE = os.path.join(DIRECTORY, "z_latest-checkpoint.pt")
+PRETRAINED_MODEL_FILE = os.path.join(DIRECTORY, "z_pretrained.pt")
 TRAINING_MODES = {"fresh", "resume", "transfer"}
 
 

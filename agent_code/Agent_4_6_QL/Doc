@@ -1,0 +1,55 @@
+Agent_4_6_QL – Änderungen gegenüber Agent_3_2_QL
+
+Agent_4_6_QL baut auf Agent_3_2_QL auf und wurde für Subgoal 4 weiterentwickelt. Der Schwerpunkt liegt auf robusterem Verhalten in echten Kampfsituationen gegen stärkere Gegner.
+
+* Verbesserte Gegnerverfolgung: Ein einmal gewähltes Angriffsziel wird für einige Schritte beibehalten,
+                                damit der Agent nicht ständig auf Bewegungen des Gegners reagiert und
+                                dadurch selbst in Links-Rechts-Loops gerät.
+
+* Neue Zielpriorisierung: Eine direkt mögliche und sichere Attacke hat höchste Priorität.
+                          Nahe Coins werden anschließend eingesammelt, bevor weiter entfernte Gegner verfolgt werden.
+
+* Sicherere Angriffsauswahl: Gegnerpositionen werden nur als Angriffsziel genutzt, wenn die Position erreichbar
+                             und nicht aktuell gefährlich ist.
+
+* Verbessertes Kisten-Feature: crate_adjacent wurde durch crate_in_blast_range ersetzt.
+                               Dadurch erkennt der Agent nicht mehr nur direkt benachbarte Kisten, sondern alle Kisten,
+                               die tatsächlich von einer Bombe getroffen werden könnten.
+
+* Neue Gefahrenstufen: Mit danger_urgency wird zwischen normaler Bombengefahr und
+                       unmittelbar bevorstehender Explosion unterschieden.
+
+* Gezielteres Fluchttraining: Bewegungen in die berechnete Fluchtrichtung werden belohnt.
+                              Bei unmittelbar bevorstehenden Explosionen ist dieser Reward stärker.
+
+* Gefahr verlassen stärker belohnt: Das erfolgreiche Verlassen eines Bombenbereichs erhält einen höheren Reward,
+                                    während das Betreten eines gefährlichen Bereichs stärker bestraft wird.
+
+* WAIT in Gefahr stärker bestraft: Besonders bei einer kurz bevorstehenden Explosion erhält das Warten eine deutliche Strafe.
+
+* Unsichere Bomben stärker bestraft: Bomben ohne sicheren Fluchtweg oder Bomben, die bereits innerhalb
+                                     einer Gefahrensituation gelegt werden, erhalten höhere negative Rewards.
+
+* Bomben mit taktischem Nutzen bevorzugt: Bomben gegen Gegner oder Kisten erhalten weiterhin positive Rewards,
+                                          während Bomben ohne erkennbaren Zweck stärker bestraft werden.
+
+* Loop-Erkennung erweitert: Zusätzlich wird gespeichert, aus welcher Richtung der Agent gerade in einen
+                            Zwei-Feld-Loop zurückgekehrt ist.
+
+* Fortsetzen eines Loops gezielt bestraft: Läuft der Agent nach einem erkannten A → B → A erneut direkt nach B,
+                                          erhält genau diese Aktion eine zusätzliche Strafe.
+
+* Stagnation stärker bestraft: Wiederholtes Stehenbleiben wird deutlicher negativ bewertet.
+
+* Exploration verbessert: Während des Trainings werden in einem bekannten Zustand bevorzugt Aktionen ausprobiert,
+                          für die noch kein Q-Wert gelernt wurde.
+
+* Umgang mit unbekannten Q-Werten verbessert: Ungelernte Aktionen werden bei der normalen Aktionswahl nicht
+                                              mehr automatisch mit Q = 0 bewertet und können dadurch gelernte, aber
+                                              leicht negative Aktionen nicht unbeabsichtigt verdrängen.
+
+* Rewards neu ausbalanciert: Coin-, Kill-, Selbstmord- und WAIT-Rewards wurden angepasst, damit Überleben,
+                             sinnvolle Bewegung und taktisches Spielen stärker gegenüber einzelnen hohen Rewards gewichtet werden.
+
+* Ziel der Version: Agent_4_6_QL soll weniger anfällig für Loops und unnötige Selbsttötungen sein,
+                    Gefahrensituationen zuverlässiger erkennen und gleichzeitig Gegner aktiver und kontrollierter bekämpfen.

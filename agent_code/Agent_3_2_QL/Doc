@@ -1,0 +1,24 @@
+## Agent_3_2_QL – Änderungen gegenüber Agent_2_3_QL
+
+Agent_3_2_QL baut direkt auf Agent_2_3_QL auf und erweitert diesen für Subgoal 3,
+also das gezielte Jagen und Ausschalten gegnerischer Agents.
+
+* Gegner als neues Ziel: Gegnerpositionen werden nun aktiv in die Zielsuche einbezogen.
+* Neues Feature `opponent_in_blast_range`: Der Zustand enthält jetzt die Information,
+  ob ein Gegner von der aktuellen Position aus durch eine Bombe getroffen werden könnte.
+* Neue Funktion `can_hit_opponent_from_position()`: Prüft, ob sich ein Gegner im möglichen
+  Explosionsradius einer Bombe befindet.
+* Erweiterte BFS-Zielsuche: Der Agent sucht gezielt nach Positionen, von denen aus ein Gegner angegriffen werden kann.
+* Sicherheitsprüfung vor Angriffen: Eine Angriffsposition wird nur bevorzugt, wenn sie nicht bereits
+  gefährlich ist und nach dem Bombenwurf weiterhin ein Fluchtweg vorhanden ist.
+* Neue Zielpriorisierung: Gegner bzw. geeignete Angriffspositionen werden vor Coins und Kisten priorisiert.
+* Reward für `KILLED_OPPONENT`: Erfolgreiches Ausschalten eines Gegners wird mit +40 stark belohnt.
+* Reward für offensive Bomben: Eine sichere Bombe erhält zusätzlich +5, wenn sich
+  ein Gegner im Explosionsbereich befindet.
+* Höhere Todesstrafe: `GOT_KILLED` wurde von −20 auf −30 erhöht, um riskantes Angriffsverhalten stärker zu bestrafen.
+* Warten in Gefahr wird bestraft: Für `WAIT` in einer Gefahrensituation gibt es zusätzlich −1,5 Reward.
+* Unsichere Bomben stärker bestraft: Bomben ohne sicheren Fluchtweg werden nun unabhängig von angrenzenden Kisten negativ bewertet.
+* Coin-Reward erhöht: `COIN_COLLECTED` wurde von +10 auf +20 erhöht, damit das Verhalten aus den vorherigen Subgoals weiterhin erhalten bleibt.
+* Loop-Behandlung erweitert: Loop-Strafen werden auch in Gefahrensituationen berücksichtigt und dort teilweise stärker gewichtet.
+* Ziel der Version: Das bereits vorhandene Navigations-, Bomben- und Fluchtverhalten aus Agent_2_3_QL
+  wird um ein gezieltes offensives Verhalten gegen Gegner erweitert.
