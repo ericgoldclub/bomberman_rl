@@ -1,0 +1,34 @@
+\begin{thebibliography}{4}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Ng et~al.(1999)Ng, Harada, and Russell]{ng1999shaping}
+Andrew~Y. Ng, Daishi Harada, and Stuart Russell.
+\newblock Policy invariance under reward transformations: Theory and application to reward shaping.
+\newblock In \emph{Proceedings of the Sixteenth International Conference on Machine Learning}, pages 278--287. Morgan Kaufmann, 1999.
+\newblock URL \url{https://ai.stanford.edu/~ang/papers/shaping-icml99.pdf}.
+
+\bibitem[Roderick et~al.(2017)Roderick, MacGlashan, and Tellex]{roderick2017implementing}
+Melrose Roderick, James MacGlashan, and Stefanie Tellex.
+\newblock Implementing the deep {Q}-network.
+\newblock \emph{arXiv preprint arXiv:1711.07478}, 2017.
+\newblock URL \url{https://arxiv.org/abs/1711.07478}.
+\newblock Version 1. Local source: 1711.07478v1.pdf.
+
+\bibitem[van Hasselt et~al.(2015)van Hasselt, Guez, and Silver]{vanhasselt2015double}
+Hado van Hasselt, Arthur Guez, and David Silver.
+\newblock Deep reinforcement learning with double {Q}-learning.
+\newblock \emph{arXiv preprint arXiv:1509.06461}, 2015.
+\newblock URL \url{https://arxiv.org/abs/1509.06461}.
+\newblock Version 3. Local source: 1509.06461v3.pdf.
+
+\bibitem[Wang et~al.(2016)Wang, Schaul, Hessel, van Hasselt, Lanctot, and de~Freitas]{wang2016dueling}
+Ziyu Wang, Tom Schaul, Matteo Hessel, Hado van Hasselt, Marc Lanctot, and Nando de~Freitas.
+\newblock Dueling network architectures for deep reinforcement learning.
+\newblock In \emph{Proceedings of the 33rd International Conference on Machine Learning}, volume~48 of \emph{Proceedings of Machine Learning Research}, pages 1995--2003. PMLR, 2016.
+\newblock URL \url{https://proceedings.mlr.press/v48/wangf16.html}.
+
+\end{thebibliography}
