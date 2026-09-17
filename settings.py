@@ -27,15 +27,15 @@ SCENARIOS = {
     },
     "loot-crate15": {
         "CRATE_DENSITY": 0.15,
-        "COIN_COUNT": 50
+        "COIN_COUNT": 9
         },
     "loot-crate30": {
         "CRATE_DENSITY": 0.30,
-        "COIN_COUNT": 50
+        "COIN_COUNT": 9
         },
     "loot-crate75": {
         "CRATE_DENSITY": 0.75,
-        "COIN_COUNT": 50
+        "COIN_COUNT": 9
         },
     # this is the tournament game mode
     "classic": {
@@ -51,7 +51,7 @@ MAX_AGENTS = 4
 DEFAULT_TRAINING_GAMES = 50_000
 
 # Round properties
-MAX_STEPS = 600
+MAX_STEPS = 400
 
 # GUI properties
 GRID_SIZE = 30

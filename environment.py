@@ -288,10 +288,17 @@ class GenericWorld:
         for a in self.agents:
             a.note_stat("score", a.score)
             a.note_stat("rounds")
-        self.round_statistics[self.round_id] = {
-            "steps": self.step,
-            **{key: sum(a.statistics[key] for a in self.agents) for key in ["coins", "kills", "suicides"]}
-        }
+        # Long training schedules do not request a statistics file. Avoid
+        # retaining one dictionary per round for all 100,000 rounds in that
+        # common case.
+        if self.args.save_stats is not False:
+            self.round_statistics[self.round_id] = {
+                "steps": self.step,
+                **{
+                    key: sum(a.statistics[key] for a in self.agents)
+                    for key in ["coins", "kills", "suicides"]
+                },
+            }
 
     def time_to_stop(self):
         # Check round stopping criteria
@@ -344,6 +351,11 @@ class GenericWorld:
 class BombeRLeWorld(GenericWorld):
     def __init__(self, args: WorldArgs, agents):
         super().__init__(args)
+
+        # RUEHL writes its useful training messages to game.log itself. Keep
+        # the world's initialization line, but drop its very noisy step log.
+        if any(agent_dir == "RUEHL_BASED_AGENT" for agent_dir, _ in agents):
+            self.logger.setLevel(logging.WARNING)
 
         self.rng = np.random.default_rng(args.seed)
         self.setup_agents(agents)

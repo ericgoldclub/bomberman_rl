@@ -73,8 +73,19 @@ class RuehlBasedAgentTests(unittest.TestCase):
         suicide_reward = train.reward_from_events(
             agent, [e.KILLED_SELF, e.GOT_KILLED, e.BOMB_EXPLODED]
         )
-        self.assertGreater(killer_reward, 10)
-        self.assertAlmostEqual(suicide_reward, -6.002)
+        self.assertGreater(
+            killer_reward,
+            train.REWARD_PROFILES["killer"]["major"][e.KILLED_OPPONENT],
+        )
+        self.assertAlmostEqual(
+            suicide_reward,
+            train.REWARD_PROFILES["killer"]["suicide"]
+            - train.REWARD_PROFILES["killer"]["step_cost"],
+        )
+        self.assertLess(
+            train.reward_from_events(agent, [e.REVERSED_DIRECTION]),
+            train.reward_from_events(agent, []),
+        )
 
         directional_events = {
             e.MOVED_CLOSE_TO_COIN,
@@ -118,6 +129,36 @@ class RuehlBasedAgentTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(model_file))
         self.assertEqual(agent.best_mean_enemies_killed, 0.5)
         self.assertEqual(agent.best_suicide_rate, 0.5)
+        self.assertEqual(
+            agent.best_score,
+            train.model_score("killer", 2.5, 0.5, 0.5),
+        )
+
+    def test_transfer_waits_for_scheduled_evaluation(self):
+        agent = SimpleNamespace(
+            logger=logging.getLogger("ruehl-transfer-test"),
+            policy_net=DQN(7, (17, 17), 10, 6),
+            device=torch.device("cpu"),
+            training_mode="transfer",
+            _resume_data=None,
+        )
+        with (
+            patch.object(train, "save_hyperparameters"),
+            patch.dict(
+                os.environ,
+                {
+                    "DQN_REWARD_PROFILE": "killer",
+                    "DQN_TOTAL_COINS": "9",
+                    "DQN_LOG_EVAL_EVENTS": "1",
+                },
+            ),
+        ):
+            train.setup_training(agent)
+
+        self.assertFalse(agent.evaluation_round)
+        self.assertEqual(agent.evaluation_left, 0)
+        self.assertEqual(agent.training_rounds, 0)
+        self.assertEqual(len(agent.memory), 0)
 
     def test_evaluation_event_log_reports_per_round_means(self):
         logger = logging.getLogger("ruehl-event-log-test")
@@ -227,6 +268,27 @@ class RuehlBasedAgentTests(unittest.TestCase):
             self.assertIn(key + "=", saved)
         self.assertIn("STEPS_DONE=123", saved)
         self.assertIn("BEST_MODEL_MEAN_ENEMIES_KILLED=0.7500000000", saved)
+
+    def test_oversized_replay_is_not_deserialized(self):
+        logger = logging.getLogger("ruehl-replay-size-test")
+        agent = SimpleNamespace(
+            buffer_size=20_000,
+            memory=deque(maxlen=20_000),
+            logger=logger,
+        )
+        oversized = 20_000 * train.MAX_SERIALIZED_BYTES_PER_TRANSITION + 1
+
+        with (
+            patch.object(train.os.path, "isfile", return_value=True),
+            patch.object(train.os.path, "getsize", return_value=oversized),
+            patch("builtins.open") as open_file,
+            self.assertLogs(logger, level="WARNING") as captured,
+        ):
+            train.load_replay(agent)
+
+        open_file.assert_not_called()
+        self.assertEqual(len(agent.memory), 0)
+        self.assertIn("Ignoring oversized replay buffer", "\n".join(captured.output))
 
     def test_double_dqn_update_runs(self):
         model = DQN(7, (17, 17), 10, 6)

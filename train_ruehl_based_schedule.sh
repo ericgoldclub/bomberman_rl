@@ -6,17 +6,16 @@ PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="${PROJECT_ROOT}/agent_code/RUEHL_BASED_AGENT"
 HYPERPARAMS_FILE="${AGENT_DIR}/Hyperparams.prm"
 
-CURRENT_BEST="${AGENT_DIR}/best-model.pt"
-CURRENT_CHECKPOINT="${AGENT_DIR}/latest-checkpoint.pt"
-CURRENT_REPLAY="${AGENT_DIR}/replay.pkl"
-PRETRAINED_MODEL="${AGENT_DIR}/pretrained.pt"
+CURRENT_BEST="${AGENT_DIR}/z_best-model.pt"
+CURRENT_CHECKPOINT="${AGENT_DIR}/z_latest-checkpoint.pt"
+CURRENT_REPLAY="${AGENT_DIR}/z_replay.pkl"
 
-COIN_ROUNDS="${COIN_ROUNDS:-30000}"
-CRATE_ROUNDS="${CRATE_ROUNDS:-60000}"
-KILLER_ROUNDS="${KILLER_ROUNDS:-120000}"
+KILLER_ROUNDS="${KILLER_ROUNDS:-30000}"
+SELF_PLAY_ROUNDS="${SELF_PLAY_ROUNDS:-30000}"
 EVAL_EVERY="${EVAL_EVERY:-180}"
 EVAL_ROUNDS="${EVAL_ROUNDS:-20}"
-LOG_EVAL_EVENTS="${LOG_EVAL_EVENTS:-${DQN_LOG_EVAL_EVENTS:-0}}"
+REPLAY_BUFFER_SIZE="${REPLAY_BUFFER_SIZE:-35000}"
+LOG_EVAL_EVENTS="${LOG_EVAL_EVENTS:-${DQN_LOG_EVAL_EVENTS:-1}}"
 
 if [[ -n "${PYTHON_BIN:-}" ]]; then
     PYTHON_EXECUTABLE="${PYTHON_BIN}"
@@ -33,7 +32,7 @@ if [[ ! -x "${PYTHON_EXECUTABLE}" ]]; then
     exit 1
 fi
 
-for value in "${COIN_ROUNDS}" "${CRATE_ROUNDS}" "${KILLER_ROUNDS}" "${EVAL_EVERY}" "${EVAL_ROUNDS}"; do
+for value in "${KILLER_ROUNDS}" "${SELF_PLAY_ROUNDS}" "${EVAL_EVERY}" "${EVAL_ROUNDS}" "${REPLAY_BUFFER_SIZE}"; do
     if [[ ! "${value}" =~ ^[1-9][0-9]*$ ]]; then
         echo "Round and evaluation settings must be positive integers." >&2
         exit 1
@@ -85,15 +84,20 @@ snapshot_paths() {
 }
 
 # Check all output names before spending time on the first stage.
-for stage in coin-heaven-50 loot-crate30-50 peaceful-killer; do
+for stage in classic-killer classic-self-play; do
     while IFS= read -r output; do
         require_new_file "${output}"
     done < <(snapshot_paths "${stage}")
 done
-require_file "${PRETRAINED_MODEL}"
 
 set_hyperparameter "GAMMA" "0.99"
-set_hyperparameter "LR" "2.5e-4"
+# Transfer learning should refine the pretrained policy, not rapidly replace it.
+set_hyperparameter "LR" "5e-5"
+# Each transition contains two 7x17x17 NumPy arrays. A 100,000-item
+# buffer used about 1.3 GiB merely to deserialize and caused this stage to be
+# killed under system memory pressure. Keep enough varied experience without
+# crowding out the game and optimizer.
+set_hyperparameter "BUFFER_SIZE" "${REPLAY_BUFFER_SIZE}"
 set_hyperparameter "TARGET_UPDATE" "1000"
 set_hyperparameter "MIN_REPLAY_SIZE" "2000"
 set_hyperparameter "TRAIN_EVERY_STEPS" "4"
@@ -121,6 +125,10 @@ run_stage() {
 
     if [[ "${mode}" == "transfer" ]]; then
         require_file "${input_model}"
+        if [[ "${input_model}" == "${model_output}" ]]; then
+            echo "A training stage cannot use its own output as its input: ${input_model}" >&2
+            exit 1
+        fi
     fi
 
     set_hyperparameter "EPSILON_START" "${epsilon}"
@@ -175,22 +183,18 @@ run_stage() {
 
 cd -- "${PROJECT_ROOT}"
 
-# 1. Continue coin training from the supplied pretrained policy.
 run_stage \
-    "coin-heaven-50" "transfer" "coin" "coin-heaven" "${COIN_ROUNDS}" \
-    "0.90" "750_000" "50" "${PRETRAINED_MODEL}"
+    "classic-killer" "transfer" "killer" "classic" "${KILLER_ROUNDS}" \
+    "0.25" "600_000" "9" "${AGENT_DIR}/loot-crate30-killer.pt" \
+    rule_based_agent rule_based_agent rule_based_agent
 
-# 2. Keep the coin policy and add moderate crate destruction.
+# Continue in classic against a frozen copy of the current policy and two
+# rule-based opponents. Only the first RUEHL_BASED_AGENT is trained.
 run_stage \
-    "loot-crate30-50" "transfer" "loot_exploration" "loot-crate30" "${CRATE_ROUNDS}" \
-    "0.55" "1_500_000" "50" "${AGENT_DIR}/coin-heaven-50.pt"
-
-# 3. Keep the navigation/bomb skills and learn to kill passive opponents.
-run_stage \
-    "peaceful-killer" "transfer" "killer" "coin-heaven-9" "${KILLER_ROUNDS}" \
-    "0.45" "14_000_000" "9" "${AGENT_DIR}/loot-crate30-50.pt" \
-    peaceful_agent peaceful_agent peaceful_agent
+    "classic-self-play" "transfer" "killer" "classic" "${SELF_PLAY_ROUNDS}" \
+    "0.25" "600_000" "9" "${AGENT_DIR}/classic-killer.pt" \
+    RUEHL_BASED_AGENT rule_based_agent rule_based_agent
 
 echo
 echo "RUEHL_BASED_AGENT curriculum completed."
-echo "Final model: ${AGENT_DIR}/peaceful-killer.pt"
+echo "Final model: ${AGENT_DIR}/classic-self-play.pt"

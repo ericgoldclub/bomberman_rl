@@ -227,12 +227,19 @@ class AgentRunner:
         self.fake_self.train = train
 
         self.wlogger = logging.getLogger(self.agent_name + '_wrapper')
-        self.wlogger.setLevel(s.LOG_AGENT_WRAPPER)
         self.fake_self.logger = logging.getLogger(self.agent_name + '_code')
-        self.fake_self.logger.setLevel(s.LOG_AGENT_CODE)
-        if self.code_name == "dqn_agent_v3" and game_log_path is not None:
-            # Keep the v3 agent's useful INFO records beside the corresponding
-            # game events instead of creating a second agent-specific log.
+
+        # Opponents can emit several INFO/DEBUG records for every action.  They
+        # are evaluation partners here, so retain only actionable diagnostics
+        # from them and avoid formatting/writing movement logs altogether.
+        logger_level = s.LOG_AGENT_CODE if train else logging.WARNING
+        wrapper_level = s.LOG_AGENT_WRAPPER if train else logging.WARNING
+        self.wlogger.setLevel(wrapper_level)
+        self.fake_self.logger.setLevel(logger_level)
+
+        if train and self.code_name in {"dqn_agent_v3", "RUEHL_BASED_AGENT"} and game_log_path is not None:
+            # Keep useful DQN initialization and evaluation records in the
+            # stage log instead of creating a second agent-specific log.
             handler = logging.FileHandler(game_log_path, mode="a")
             handler.setLevel(logging.INFO)
         else:
@@ -243,7 +250,7 @@ class AgentRunner:
                 f'{log_dir}{self.agent_name}.log',
                 mode="w",
             )
-            handler.setLevel(logging.DEBUG)
+            handler.setLevel(logging.DEBUG if train else logging.WARNING)
         formatter = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')
         handler.setFormatter(formatter)
         self.wlogger.addHandler(handler)
