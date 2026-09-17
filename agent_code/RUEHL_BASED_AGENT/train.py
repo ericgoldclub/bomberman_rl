@@ -27,6 +27,10 @@ HYPERPARAMS_FILE = os.path.join(DIRECTORY, "Hyperparams.prm")
 REPLAY_FILE = os.path.join(DIRECTORY, "z_replay.pkl")
 MODEL_NAME = "ruehl-dqn-v1"
 REPLAY_SAVE_EVERY_ROUNDS = 100
+# Packed transitions currently serialize to about 4.2 KiB apiece. Refuse to
+# deserialize a substantially larger, stale replay because pickle must first
+# materialize the entire file, even when only its tail would be retained.
+MAX_SERIALIZED_BYTES_PER_TRANSITION = 8 * 1024
 
 Transition = namedtuple(
     "Transition", "board scalar action next_board next_scalar next_mask reward"
@@ -204,14 +208,29 @@ def save_checkpoint(self):
 
 
 def save_replay(self):
-    with open(REPLAY_FILE, "wb") as file:
-        pickle.dump(list(self.memory), file, protocol=pickle.HIGHEST_PROTOCOL)
+    temporary_file = REPLAY_FILE + ".tmp"
+    try:
+        with open(temporary_file, "wb") as file:
+            pickle.dump(list(self.memory), file, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(temporary_file, REPLAY_FILE)
+    finally:
+        if os.path.exists(temporary_file):
+            os.remove(temporary_file)
 
 
 def load_replay(self):
     if not os.path.isfile(REPLAY_FILE):
         return
     try:
+        replay_size = os.path.getsize(REPLAY_FILE)
+        safe_size = self.buffer_size * MAX_SERIALIZED_BYTES_PER_TRANSITION
+        if replay_size > safe_size:
+            self.logger.warning(
+                "Ignoring oversized replay buffer (%d MiB for capacity %d); "
+                "starting with an empty one",
+                replay_size // (1024 * 1024), self.buffer_size,
+            )
+            return
         with open(REPLAY_FILE, "rb") as file:
             self.memory.extend(pickle.load(file)[-self.buffer_size :])
     except (OSError, pickle.PickleError, EOFError):
