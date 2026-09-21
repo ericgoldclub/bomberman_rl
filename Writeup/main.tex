@@ -5,20 +5,22 @@
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs,tabularx,array}
+\usepackage{graphicx}
 \usepackage{microtype}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage{xcolor}
 \usepackage{placeins}
 \usepackage[hidelinks]{hyperref}
 
-\newcommand{\agent}{\texttt{RUEHL\_BASED\_AGENT}}
+
 \newcommand{\todo}[1]{\par\smallskip\noindent\textcolor{red!65!black}{\textbf{TODO:} #1}\par\smallskip}
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 \setlength{\emergencystretch}{2em}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.65em}
 
-\title{Deep Reinforcement Learning for Bomberman\\
-  \large Theory, Training Methodology, and Evaluation of the \agent}
-\author{\texttt{[Name]}\\\textit{[Course / institution]}}
+\title{Deep Reinforcement Learning for Bomberman}
+\author{\texttt{Eric Flämig, Mark Salzmann, Jesper Eggers}}
 \date{\today}
 
 \begin{document}
@@ -26,27 +28,10 @@
 
 \begin{abstract}
 Bomberman combines navigation, delayed rewards, and decisions that can place
-the agent itself in danger. This report describes the \agent, which estimates
-action values using a convolutional neural network with a dueling output
-architecture. It introduces the Double Deep Q-Network (Double DQN) learning
-rule and explains how board features, scalar features, and action masking
-support decision making. The training methodology is organized around a
-curriculum from coin collection to crate destruction and finally play against
-opponents. An evaluation framework distinguishes navigation, bomb use, and
-competitive performance. This draft documents the available implementation;
-training hyperparameters and numerical results remain to be completed from
-the experiment records.
+the agent itself in danger. 
+This report discusses the two agents we developed parallely, both relying on the Double Deep Q-Network (Double DQN) learning algorithm.
 \end{abstract}
 
-\noindent\textbf{Draft status.}
-The implementation descriptions below are based on
-\texttt{Networks.py}, \texttt{callbacks.py}, \texttt{train.py}, and the
-project's environment configuration. The training code now confirms the
-Double DQN update, reward profiles, and model-selection procedure. Numerical
-hyperparameters from \texttt{Hyperparams.prm} and empirical results remain
-to be supplied; the available log directory is empty.
-
-% The article class uses sections as its top-level divisions, not chapters.
 \section{Theoretical Background and Agent Architecture}
 \label{sec:theory}
 
@@ -118,7 +103,7 @@ and note that action selection in the $\arg\max$ still uses the online parameter
 In Bomberman, a relevant motivation is to avoid overvaluing risky actions whose apparent payoff is based on inaccurate predictions.
 The double DQN approach is beneficial in this context, as it helps the agent get more accurate value estimates for risky actions, leading to safer and more effective decision-making.
 
-\subsection{Input representation}
+\subsection{Input representation and feature engineering}
 The function \texttt{state\_to\_features} converts the observation into seven
 spatial maps and ten scalar values. The board input has shape
 $7\times17\times17$ and uses game information directly rather than rendered
@@ -171,12 +156,44 @@ Opponents & Onehot encoding of each opponent's tile. \\
 
 By providing the agent with absolute information about the game state, such as the number of remaining coins, opponents, and the current step, the network can make more informed decisions.
 
-\subsection{Neural network architecture}
+
+\subsection{Exploration with an epsilon-greedy policy}
+The agent implements an $\epsilon$-greedy policy. Let $\mathcal{A}_m(s)$ be
+the actions retained by its mask. During training, the action is sampled as
+\begin{equation}
+a_t=\begin{cases}
+\text{a uniform random action from }\mathcal{A}_m(s_t),
+& \text{with probability }\epsilon_t,\\
+\displaystyle\operatorname*{arg\,max}_{a\in\mathcal{A}_m(s_t)}
+Q_\theta(s_t,a), & \text{with probability }1-\epsilon_t.
+\end{cases}
+\end{equation}
+Exploration supplies experience with actions that the current network may
+undervalue, whereas exploitation uses what has already been learned. Both branches
+respect the mask. The random branch can also select the greedy action, so
+$\epsilon_t$ is the probability of random selection, not necessarily the
+probability of taking a non-greedy action.
+
+In order to provide sufficient exploration early in training, but gradually reduce it as the agent learns, we use an exponentially decaying epsilon
+\begin{equation}
+\epsilon_t=\epsilon_{\min}+
+(\epsilon_{\mathrm{start}}-\epsilon_{\min}) \cdot \exp\left(-\frac{t}{T_{\mathrm{decay}}}\right).
+\end{equation}
+It is beneficial to choose $T_{\mathrm{decay}} = \frac{T_{\mathrm{Half-life}}}{\ln 2}$.
+
+During the whole training process, the agent is faced with different training epochs. 
+This introduces varying scenarios, obstacles, and opponents.
+To provide adequate exploration, it is a good trick to reset epsilon to a middle value at the beginning of each new training epoch, as discussed in \ref{sec:curriculum}.
+
+
+\subsection{Ruehl based agent}
+
+\subsubsection{Neural network architecture}
 Given the combination of spatial and scalar features, it is reasonable to use a network architecture that processes these two types of inputs separately before combining them for decision making.
 The spatial branch contains four convolutional layers with ReLU activations.
 Dilated convolutions expand the area visible to a filter without increasing its number of weights, while the third convolution reduces the spatial resolution. 
 Table~\ref{tab:network} gives the dimensions derived from
-\texttt{Networks.py}; the batch dimension is omitted.
+\texttt{Networks.py} with the batch dimension is omitted.
 
 \begin{table}[htbp]
 \centering
@@ -256,49 +273,15 @@ The two quantities are not trained using separate value and advantage targets. I
 
 
 \FloatBarrier
-\section{Training Methodology}
-\label{sec:method}
 
 
-\subsection{Exploration with an epsilon-greedy policy}
-The agent implements an $\epsilon$-greedy policy. Let $\mathcal{A}_m(s)$ be
-the actions retained by its mask. During training, the action is sampled as
-\begin{equation}
-a_t=\begin{cases}
-\text{a uniform random action from }\mathcal{A}_m(s_t),
-& \text{with probability }\epsilon_t,\\
-\displaystyle\operatorname*{arg\,max}_{a\in\mathcal{A}_m(s_t)}
-Q_\theta(s_t,a), & \text{with probability }1-\epsilon_t.
-\end{cases}
-\end{equation}
-Exploration supplies experience with actions that the current network may
-undervalue; exploitation uses what has already been learned. Both branches
-respect the mask. The random branch can also select the greedy action, so
-$\epsilon_t$ is the probability of random selection, not necessarily the
-probability of taking a non-greedy action.
 
-In \texttt{act}, $\epsilon_t$ comes from \texttt{epsilon\_current}; it defaults
-to 1.0 in training if that attribute has not been set. Evaluation rounds and
-normal non-training play use $\epsilon=0$. The inference code contains no
-decay schedule. A possible linear schedule, included here only to illustrate
-the mechanism, is
-\begin{equation}
-\epsilon_t=\epsilon_{\min}+
-(\epsilon_{\mathrm{start}}-\epsilon_{\min})
-\max\left(0,1-\frac{t}{T_{\mathrm{decay}}}\right).
-\end{equation}
-High initial exploration can help discover useful actions, whereas lower
-exploration later allows more consistent use of the learned policy.
-Introducing crates or opponents may require renewed exploration of actions
-that were unhelpful in earlier stages.
-Useful values for $\epsilon_{\min}$ are typically around $0.05$.
-
-\subsection{Curriculum: from coins to crates to opponents}
+\subsubsection{Training curriculum} \label{sec:curriculum}
 The training progression considered in this project starts with navigation,
 then introduces bomb use, and finally adds opponents. This curriculum is
 motivated by the difficulty of discovering all three behaviors at once:
 an inexperienced agent can otherwise die before collecting useful examples
-of delayed rewards. Table~\ref{tab:curriculum} links the progression to the
+of delayed rewards. Table \ref{tab:curriculum} links the progression to the
 available scenarios.
 
 \begin{table}[htbp]
@@ -341,8 +324,8 @@ A progression from simpler opponents to stronger ones would let the agent adapt 
 For this purpose, we iteratively improved the model, by transfering the pretrained network from \texttt{loot-crate} to \texttt{classic} with slight epsilon reheating $\epsilon = 0.20$, then gradually increased the difficulty of opponents.
 
 
-\subsection{Action masking and hand-designed guidance}
-The mask is an important part of the effective policy. It first rejects
+\subsubsection{Action masking and hand-designed guidance}
+The mask is an important part of an effective policy. It first rejects
 movement into walls, crates, bombs, or opponents. It then filters movement
 and waiting on active explosions or blast tiles of bombs whose timers are
 at most one. Bomb placement is allowed only when a bomb is available, its
@@ -350,11 +333,9 @@ blast could hit a crate or opponent, and a static breadth-first search finds
 a tile outside its blast within the configured bomb timer.
 
 If no action survives the danger filter, the code falls back to the earlier
-legal-action mask. If that is also empty, it enables \texttt{WAIT}. The
-danger filter directly checks the movement and wait entries; the bomb entry
-uses its separate usefulness and escape checks. This is therefore a
-heuristic filter, not a guarantee of survival. Its static escape search does
-not predict moving opponents or jointly simulate other bombs over time.
+legal-action mask. If that is also empty, the model chooses \texttt{WAIT}.
+This is therefore a heuristic filter, not a guarantee of survival. 
+Its static escape search does not predict moving opponents or jointly simulate other bombs over time.
 
 This guidance reduces the exploration burden, but it also contributes to
 the observed behavior independently of learned Q-values. Results should
@@ -363,86 +344,41 @@ update in \texttt{train.py} also applies the next-state
 action mask before the online network selects its maximizing action. The
 target network then evaluates that selected action.
 
-\subsection{Reward design: objectives and behavioral guidance}
+\subsubsection{Reward shaping}
 \label{sec:reward-design}
-The reward design addresses two difficulties: useful outcomes can be delayed,
-and actions that create opportunities can also endanger the agent. Rewarding
-only collected coins and confirmed kills would give little immediate feedback
-about the actions that made those outcomes possible. The profiles therefore
-combine rewards for outcomes and intermediate progress with smaller penalties
-that guide everyday movement. The following rationale explains the intended
-role of these choices; their effectiveness and numerical weights still require
-empirical evaluation.
+The main goal of the agent is to maximize game score at the end of the game, by collecting coins, eliminating opponents, given by
+\begin{equation}
+S=N_{\mathrm{coins}}+5N_{\mathrm{opponents\ killed}}.
+\end{equation}
+However, starting from these sparse and delayed objectives alone makes it difficult for the agent to learn effective strategies.
+Reward shaping addresses this problem, by giving intermediate rewards and punishments that guide the agent's behavior before the final game outcome is known.
+For the \texttt{ruehl\_based\_agent}, we rejected anisotropic rewards, meaning rewards that vary depending on the direction or context of the action. 
+Combined with the CNN architecture, this design choice ensures that the agent exploits the symmetry of the game environment.
+Furthermore, we only introduce additional shaping rewards that are deductable from the input game state, e.g. rewarding the survival of own placed bombs or penalizing the agent for being in the blast radius of an active explosion.
+Furthermore, one can differentiate between main rewards, connecting to significant game events, and shaping rewards, which serve as fine tuning of the agent's behavior. The shaping rewards are an order of magnitude smaller than the main rewards.
 
-\paragraph{Main rewards define progress and its costs.}
-The main contribution, stored under \texttt{major} in the implementation,
-assigns values to selected game events. Collecting a coin provides a common
-unit of reward across all three profiles. Killing an opponent receives a
-larger reward, while death carries a substantial penalty. A separate suicide
-penalty further emphasizes self-preservation in competitive play. This expresses the trade-off between
-gaining points and retaining the opportunity to act. Penalizing only death
-would encourage excessive caution; rewarding only attacks would provide
-insufficient feedback about their danger. Their combination is intended to
-encourage productive risks with an escape plan.
+\paragraph{Main rewards}
+The main contribution, stored under \texttt{major},
+assigns values to selected game events.
+Collecting a coin provides a baseline reward, typically 1 point, in accordance with the actual game score.
+Other rewards will be scaled relative to this baseline.
+A separate Self-destruction penalty is useful in competitive play. 
+This expresses the trade-off between gaining points and retaining the opportunity to act. 
+Penalizing only death would encourage excessive caution, meanwhile rewarding only attacks would provide insufficient feedback about their danger. 
+Their combination is intended to encourage productive risks with an escape plan.
 
-The main contribution also includes intermediate incentives: revealing a
-coin, destroying a crate, or placing a bomb that threatens a useful target.
-These events shorten the delay between an action and positive feedback.
-For example, the crate profile rewards opening a route before a hidden coin
-is collected. Importantly, \emph{main} does not mean identical to the game's
-score: these intermediate bonuses are also reward shaping in the broader
-reinforcement-learning sense. The code's distinction is operational:
-main event rewards are accumulated without clipping, whereas the separate
-\texttt{shaping} contribution is bounded. Preserving the main event sum lets
-an action that destroys several crates receive credit for each one.
-
-\paragraph{Shaping penalties express soft behavioral preferences.}
+\paragraph{Shaping penalties}
 The separate shaping terms discourage waiting, entering an active explosion,
 and, in the competitive profile, immediately reversing movement direction.
 Their purpose is to discourage inactivity and repeated back-and-forth motion
 without making these actions impossible. Waiting for an explosion to clear
 or reversing direction to escape can be necessary, so these penalties should
-remain small relative to important outcomes. In particular, the danger
-penalty supplies local feedback about an active explosion; it does not by
-itself teach prediction of every future blast. Action masking provides
-additional guidance, as described above.
+remain small relative to important outcomes.
 
-\paragraph{Clipping controls the influence of frequent feedback.}
-Several shaping events can occur in one transition. Clipping their combined
-contribution limits their combined penalty on that step, while leaving the
-main event rewards intact. The limits of $0.05$ for
-\texttt{coin} and \texttt{loot\_exploration}, and $0.15$ for \texttt{killer},
-are small compared with the $1.0$ collection reward. This establishes a
-per-step scale, not a guarantee that shaping cannot dominate a long episode:
-repeated small penalties still accumulate. The additional step cost favors
-shorter successful trajectories, but is removed during crate exploration
-to reduce pressure against lengthy bombing and escape sequences. The
-completion bonus separately encourages finishing collection rather than
-leaving the last coins uncollected.
-
-\paragraph{Limits of the design and its justification.}
-These event-based incentives encode useful hypotheses about behavior, but
-an intermediate reward is only a proxy for success. For instance, repeatedly
-threatening an opponent can earn placement rewards without producing a kill.
-Ng et al.\ show that potential-based shaping can preserve optimal policies
-under the conditions of their framework \citep{ng1999shaping}; our event
-bonuses and penalties are not constructed to satisfy that guarantee.
-Consequently, we assess checkpoints using game outcomes rather than total
-shaped return, as detailed in the model-selection subsection. Comparisons
-with individual bonuses or penalties removed would be needed to establish
-whether each component improves collection, survival, or competitive play.
-
-\subsection{Task-specific reward profiles}
-The environment's game score is
-\begin{equation}
-S=N_{\mathrm{coins}}+5N_{\mathrm{opponents\ killed}},
-\end{equation}
-whereas the learning reward provides additional feedback for intermediate
-behaviors. Three task-specific profiles support this progression:
-\texttt{coin}, \texttt{loot\_exploration}, and \texttt{killer}.
-The environment variable \texttt{DQN\_REWARD\_PROFILE} selects the profile;
-\texttt{standard} is an additional default. All profiles share the same
-training loop.
+\subsubsection{Task-specific reward profiles}
+We identified three substantially different challenges, for which we designed corresponding reward profiles: \texttt{coin}, \texttt{loot\_exploration}, and \texttt{killer}. 
+Determining the appropriate distribution of rewards was a challenging task that required long trial and error processes.
+The current values are summarized in Table~\ref{tab:reward-profiles}.
 
 \begin{table}[htbp]
 \centering
@@ -497,185 +433,102 @@ $0.75$, while a confirmed kill earns $6.0$. Self-destruction costs $6.0$,
 substantially more than death caused by another agent. Smaller crate rewards
 preserve an incentive to open routes, and surviving the round earns $0.75$.
 The bomb-placement event checks the current blast geometry, not whether the
-opponent will actually be hit; if both opponents and crates are in range,
+opponent will actually be hit. If both opponents and crates are in range,
 only the opponent-targeting placement event is added.
 
-For each transition, \texttt{reward\_from\_events} computes
-\begin{equation}
-r_{t+1}=R_{\mathrm{major}}+
-\operatorname{clip}(R_{\mathrm{shaping}},-c,c)-\lambda.
-\end{equation}
-Thus, for example, the coin profile's waiting penalty is limited to
-$-0.05$ before subtracting the step cost. The danger event specifically checks
-whether the new position lies on an active explosion; it is distinct from
-the prospective danger map used by the policy. On self-destruction, the code
-applies the dedicated suicide penalty and skips the ordinary death and
-bomb-explosion contributions, avoiding their accumulation. Independently of
-the profile, collecting the configured total number of coins while no
-opponents remain gives a one-time completion bonus of
-$5+(\text{remaining steps}/400)$, favoring earlier completion.
-
-\subsection{Optimization and training state}
-The training loop stores transitions in a bounded replay buffer and samples
-minibatches uniformly without replacement after a configurable warm-up.
+\subsubsection{Optimization and training state}
+The training loop stores transitions in a replay buffer of fixed size, and samples
+minibatches uniformly without replacement, starting after the warm-up period.
 It implements the Double DQN target from Equation~\eqref{eq:double dqn}:
 the masked online network selects the next action, and the target network
-evaluates it. Terminal transitions have no bootstrap contribution.
-Optimization uses AdamW with a smooth L1 loss, and clips the gradient norm
-to $5.0$. The target network receives a hard copy of the online weights
-every \texttt{TARGET\_UPDATE} gradient updates. Learning occurs at a
-configured environment-step interval and through additional updates at the
-end of training rounds.
+evaluates it. 
+For optimization, the \texttt{ruehl\_based\_agent} uses AdamW with a smooth L1 loss, and clips the gradient norm
+to $5.0$. 
+The target network receives a hard copy of the online weights every \texttt{TARGET\_UPDATE} gradient updates.
 
 The replay capacity, batch size, discount factor, learning rate, warm-up,
-update intervals, and evaluation budget are read from
-\texttt{Hyperparams.prm}. That file is not available in the supplied folder,
-so its numerical values remain to be documented. These implementation
-choices matter for reproducibility and stability
-\citep{roderick2017implementing}.
+update intervals, and evaluation budget are read from \texttt{Hyperparams.prm}.
 
-Training supports fresh initialization, resuming, and transfer. Resuming
-with the same reward profile restores the policy, target network, optimizer,
-and training/evaluation counters from the latest checkpoint, progress from
-\texttt{Hyperparams.prm}, and the replay buffer if its separate file exists.
-Transfer retains the pretrained policy while starting with a new optimizer,
-empty replay buffer, and reset progress, including the best selection score.
-Attempting to resume with a different reward profile automatically uses
-this transfer behavior, so previously stored rewards do not enter the new
-profile's replay buffer. The latest checkpoint and progress file are saved
-after every round; replay is saved separately every 100 rounds.
-
-\subsection{Evaluation and model selection}
+\subsubsection{Evaluation and model selection}
 After \texttt{EVAL\_EVERY\_TRAINING\_ROUNDS} training rounds, the agent plays
 \texttt{EVAL\_ROUNDS} greedy evaluation rounds with $\epsilon=0$. During
-these rounds, no transitions are added to replay and no optimization or
-exploration-decay steps occur. Checkpoints are therefore assessed through
-the behavior of a fixed policy rather than its exploratory training return.
-
-Let $\bar{S}$ denote mean game score, $\bar{K}$ mean opponent kills per
-round, and $p_{\mathrm{suicide}}$ the fraction of evaluation rounds ending
-in self-destruction. The selection criterion is
-\begin{equation}
-J=\begin{cases}
-\bar{S}+5\bar{K}-5p_{\mathrm{suicide}}, & \text{for \texttt{killer}},\\
-\bar{S}, & \text{for the other profiles}.
-\end{cases}
-\label{eq:model-selection}
-\end{equation}
-For coin collection and crate exploration, this selects for actual game
-score rather than accumulated shaping reward. Since game score already
-includes five points per kill, the \texttt{killer} criterion effectively
-weights mean kills by ten, while explicitly penalizing suicides. Mean coin
-and crate counts, completion rate, and mean time remaining among completed
-rounds are also recorded, but do not independently affect selection.
-
-Only a strict improvement in $J$ replaces the policy weights in
-\texttt{z\_best-model.pt}; ties retain the previous model. This selected model
-is preferred during non-training play, whereas the latest checkpoint serves
-to resume training. Periodic selection is useful because DQN performance
-can fluctuate even as training continues \citep{roderick2017implementing}.
-The evaluation block supplies a point estimate without an uncertainty-based
-replacement test, so a separate final test is needed to assess whether an
-apparent improvement generalizes. Opponent lineups and evaluation budgets
-should also be held fixed when comparing selection scores.
+these rounds, no transitions are added to the replay buffer and no optimization or
+exploration decay steps occur. 
+Periodic evaluation ensures that model selection is based on up-to-date performance rather than outdated checkpoints, especially for DQN agents \citep{roderick2017implementing}.
+For coin collection and crate exploration, the selection is based on the actual game score rather than accumulated shaping rewards. 
+In competitive play, the selection score is extended by penalising self-destruction and favoring eliminating opponents.
 
 \FloatBarrier
+
 \section{Results and Discussion}
 \label{sec:results}
 
-\subsection{Evaluation protocol}
-The evaluation should test each curriculum skill as well as final competitive
-performance. Use fixed checkpoints with learning disabled and $\epsilon=0$,
-and record the scenario, opponent lineup, mask configuration, number of
-rounds, and random seeds. Compare agents on the same evaluation conditions.
-Final test seeds should be separate from those used to select checkpoints.
-
-Coin collection is best measured by coins collected per round and collection
-rate. In crate scenarios, also report crates destroyed, useful bomb outcomes,
-and self-destruction rate. For competitive play, report game score, opponent
-kills, survival, and a clearly defined win rate. One suitable score-based
-definition counts a win only when the agent has the unique highest final
-score and reports ties separately; being the last survivor is a different
-measure and should be labeled accordingly.
-
-Useful comparisons include the repository's \texttt{random\_agent},
-\texttt{coin\_collector\_agent}, and \texttt{rule\_based\_agent}, matched to
-the relevant scenario. The same final architecture trained from scratch in
-\texttt{classic} would provide a control for the curriculum. A comparison
-with reduced masking would help distinguish learned behavior from the
-hand-designed guidance. These are proposed evaluations, not completed runs.
-
-For a metric $x$, report the number of rounds $N$, sample mean, and sample
-standard deviation:
-\begin{equation}
-\bar{x}=\frac{1}{N}\sum_{i=1}^{N}x_i,\qquad
-s_x=\sqrt{\frac{1}{N-1}\sum_{i=1}^{N}(x_i-\bar{x})^2}.
-\end{equation}
-Several independent training seeds would additionally reveal variability
-between learned policies, which repeated games with one checkpoint do not
-measure. Training-return curves and greedy-evaluation curves should be
-reported separately because exploration changes the behavior being measured.
-
-\subsection{Summary of the available evidence}
-The supplied source establishes the network architecture, observation
-encoding, masked action selection, and checkpoint-loading paths. A saved
-model file is present, but the available files contain no numerical
-evaluation record. Consequently, this draft cannot yet conclude that the
-agent improved across stages, outperformed a baseline, or benefited from
-Double DQN. Table~\ref{tab:results} provides a structure for the measurements.
+\subsection{Ruehl based agent}
+Table~\ref{tab:training-stage-results} summarizes the best greedy evaluation
+observed during each curriculum stage. Each reported score is the mean over
+the 20 evaluation games used for checkpoint selection, whereas the first row
+gives the number of training games assigned to the stage.
 
 \begin{table}[htbp]
 \centering
-\small
-\begin{tabularx}{\textwidth}{@{}Ycccc@{}}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.25cm}*{6}{>{\centering\arraybackslash}X}@{}}
 \toprule
-Evaluation setting & Rounds & Coins & Game score & Self-destruction \\
- & $N$ & mean $\pm$ SD & mean $\pm$ SD & rate \\
+Metric &
+\shortstack{Coin\\collection} &
+\shortstack{Loot\\crate} &
+\shortstack{Peaceful\\killer} &
+\shortstack{Classic\\killer} &
+\shortstack{Classic\\self-play} &
+\shortstack{Classic hard\\opponents} \\
 \midrule
-Coin-heaven checkpoint & --- & --- & --- & --- \\
-Loot-crate checkpoint & --- & --- & --- & --- \\
-Final agent, classic & --- & --- & --- & --- \\
-Rule-based baseline, classic & --- & --- & --- & --- \\
+Training games & 30,000 & 60,000 & 120,000 & 30,000 & 30,000 & 18,500 \\
+Mean game score & 50.00 & 44.90 & 6.45 & 7.95 & 7.10 & 3.95 \\
+Mean coins collected & 50.00 & 44.90 & 3.20 & 4.20 & 2.60 & 1.95 \\
+Mean opponents killed & 0.00 & 0.00 & 0.65 & 0.75 & 0.90 & 0.40 \\
+Completion rate (\%) & 100 & 20 & 0 & 0 & 0 & 0 \\
+Suicide rate (\%) & 0 & 5 & 20 & 5 & 10 & 10 \\
+Mean crates destroyed & 0.00 & 43.40 & 44.05 & 44.60 & 36.35 & 29.10 \\
 \bottomrule
 \end{tabularx}
-\caption{Results to be filled from evaluation logs. Dashes denote unavailable
-measurements, not zero. Specify the opponent lineup for every setting and
-add kills, win rate, and ties for the competitive comparison.}
-\label{tab:results}
+\caption{Best-model evaluation metrics across the six training stages. Values
+are taken from the corresponding \texttt{Hyperparams.prm} snapshots.}
+\label{tab:training-stage-results}
 \end{table}
 
-\todo{Fill Table~\ref{tab:results}, add learning curves with stage boundaries,
-and summarize representative successful and failed rounds. Identify the
-checkpoint and evaluation conditions behind every reported number.}
+Figure \ref{fig:best-score-stages} depicts how the selected best-model score evolves with training. The evaluations take place every 200 games, and the current best model is saved if its score improves.
+The score converges fairly quickly in each stage, approximately within the first 5,000 games, and then plateaus.
+In the \texttt{classic killer} stage, the score has jumped at 28,000 games, suggesting that improvement continues beyond the initial plateau.
+This slow progression is characteristic of DQN training: periodic target-network synchronization changes the temporal-difference targets and therefore the loss landscape, while evaluation only measures the resulting policy.
+The results after a long enough training period are summarized in Table~\ref{tab:training-stage-results}. 
 
-\subsection{Interpretation and limitations}
-The main questions are whether navigation transfers to crate environments,
-whether bomb use yields rewards without excessive self-destruction, and
-whether those skills remain effective against opponents. Higher collection
-in the first stage would support a navigation claim; improved crate
-destruction with lower self-destruction would support more effective bomb
-use. Competitive success additionally requires evidence against a specified
-opponent lineup. These outcomes are hypotheses until measured.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/best_model_score_by_stage.pdf}
+\caption{Best model-selection score as a function of games played in each
+training stage. The evaluations take place every 200 games, and the current best model is saved if its score improves.
+The scores of the best models at each checkpoint are reported in
+Table~\ref{tab:training-stage-results}.}
+\label{fig:best-score-stages}
+\end{figure}
 
-Several design choices should inform the interpretation. First, the action
-mask prevents some mistakes before the network chooses an action, so good
-survival alone does not demonstrate that safety was learned. Second, danger
-is represented by a compact intensity map and a static escape heuristic,
-which may be insufficient for interacting threats. Third, changing the coin
-normalization or reward function between stages can change the meaning of
-inputs or predicted returns. Finally, a curriculum can cause the agent to
-forget earlier skills, making evaluation on previous scenarios useful.
+
+\FloatBarrier
 
 \subsection{Conclusion}
-The \agent\ combines a convolutional representation of the board with scalar
-context, dueling value and advantage heads, and a rule-based action mask.
-Double DQN provides a suitable theoretical learning rule by separating
-action selection from target evaluation, while a progression from coins to
-crates and opponents organizes the task into increasingly demanding skills.
-The available implementation supports a detailed account of how the policy
-acts. Completing the training configuration and empirical evaluation will
-allow the final report to establish which skills were learned and how well
-the resulting agent performs.
+\section{Conclusion}
+
+We developed and evaluated a different agents based on Double DQN, a dueling network architecture, engineered spatial and scalar features, action masking, and a staged training curriculum. 
+The curriculum successfully decomposed the task into progressively harder objectives: the agent learned coin collection perfectly in \texttt{coin-heaven} and acquired effective crate-destruction behavior in \texttt{loot-crate}. 
+In the competitive stages, it also learned to destroy crates, collect coins, and occasionally eliminate opponents while keeping self-destruction rates comparatively low.
+
+In the case of the \texttt{ruehl\_base\_agent}, the agent struggled to achieve consistent success against hard opponents, highlighting the gap between performance in simplified training environments and competitive \texttt{classic} games.
+In particular, the best model against hard opponents achieved a mean score of $3.95$ over 20 evaluation games, with a mean of $0.40$ opponent eliminations and no completed rounds.  
+Thus, the agent learned meaningful bomb-use and survival-related behavior, but is unable to overcome the enemies counter-strategies consistently.
+
+Possible next steps include evaluation over longer training periods, more systematic hyperparameter tuning, and training against a diverse population of opponents. These extensions would clarify which design choices contribute most strongly to performance and may improve robustness in the full competitive setting.
+
 
 \FloatBarrier
 \bibliographystyle{plainnat}

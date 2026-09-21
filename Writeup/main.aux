@@ -1,66 +1,75 @@
 \relax 
 \providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Theoretical Background and Agent Architecture}{1}{section.1}\protected@file@percent }
 \newlabel{sec:theory}{{1}{1}{Theoretical Background and Agent Architecture}{section.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Bomberman as a reinforcement learning problem}{1}{subsection.1.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}From Q-learning to deep Q-learning}{1}{subsection.1.2}\protected@file@percent }
 \citation{vanhasselt2015double}
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}From Q-learning to deep Q-learning}{2}{subsection.1.2}\protected@file@percent }
 \newlabel{eq:dqn}{{4}{2}{From Q-learning to deep Q-learning}{equation.1.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {1.3}Double DQN: separating selection and evaluation}{2}{subsection.1.3}\protected@file@percent }
 \newlabel{eq:double dqn}{{5}{2}{Double DQN: separating selection and evaluation}{equation.1.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.4}Input representation}{2}{subsection.1.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.4}Input representation and feature engineering}{2}{subsection.1.4}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Spatial features implemented in \texttt  {callbacks.py}.}}{3}{table.1}\protected@file@percent }
 \newlabel{tab:2d-features}{{1}{3}{Spatial features implemented in \texttt {callbacks.py}}{table.1}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Scalar features implemented in \texttt  {callbacks.py}.}}{3}{table.2}\protected@file@percent }
 \newlabel{tab:scalar-features}{{2}{3}{Scalar features implemented in \texttt {callbacks.py}}{table.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.5}Neural network architecture}{3}{subsection.1.5}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Architecture of the RUEHL network for the configured board size.}}{3}{table.3}\protected@file@percent }
-\newlabel{tab:network}{{3}{3}{Architecture of the RUEHL network for the configured board size}{table.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.5}Exploration with an epsilon-greedy policy}{3}{subsection.1.5}\protected@file@percent }
 \citation{wang2016dueling}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.6}Ruehl based agent}{4}{subsection.1.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {1.6.1}Neural network architecture}{4}{subsubsection.1.6.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Architecture of the RUEHL network for the configured board size.}}{4}{table.3}\protected@file@percent }
+\newlabel{tab:network}{{3}{4}{Architecture of the RUEHL network for the configured board size}{table.3}{}}
 \citation{wang2016dueling}
-\newlabel{eq:dueling}{{6}{4}{Neural network architecture}{equation.1.6}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {2}Training Methodology}{5}{section.2}\protected@file@percent }
-\newlabel{sec:method}{{2}{5}{Training Methodology}{section.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Exploration with an epsilon-greedy policy}{5}{subsection.2.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Curriculum: from coins to crates to opponents}{5}{subsection.2.2}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Configured scenarios and their intended training roles. Crate density is the placement probability before walls and starting areas are cleared. Opponents are configured separately from the scenario.}}{5}{table.4}\protected@file@percent }
-\newlabel{tab:curriculum}{{4}{5}{Configured scenarios and their intended training roles. Crate density is the placement probability before walls and starting areas are cleared. Opponents are configured separately from the scenario}{table.4}{}}
+\newlabel{eq:dueling}{{8}{5}{Neural network architecture}{equation.1.8}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {1.6.2}Training curriculum}{5}{subsubsection.1.6.2}\protected@file@percent }
+\newlabel{sec:curriculum}{{1.6.2}{5}{Training curriculum}{subsubsection.1.6.2}{}}
 \@writefile{toc}{\contentsline {paragraph}{Stage 1: coin collection.}{5}{section*.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Configured scenarios and their intended training roles. Crate density is the placement probability before walls and starting areas are cleared. Opponents are configured separately from the scenario.}}{6}{table.4}\protected@file@percent }
+\newlabel{tab:curriculum}{{4}{6}{Configured scenarios and their intended training roles. Crate density is the placement probability before walls and starting areas are cleared. Opponents are configured separately from the scenario}{table.4}{}}
 \@writefile{toc}{\contentsline {paragraph}{Stage 2: crate destruction.}{6}{section*.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Stage 3: opponents and competitive play.}{6}{section*.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Action masking and hand-designed guidance}{6}{subsection.2.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Reward design: objectives and behavioral guidance}{6}{subsection.2.4}\protected@file@percent }
-\newlabel{sec:reward-design}{{2.4}{6}{Reward design: objectives and behavioral guidance}{subsection.2.4}{}}
-\@writefile{toc}{\contentsline {paragraph}{Main rewards define progress and its costs.}{6}{section*.4}\protected@file@percent }
-\citation{ng1999shaping}
-\@writefile{toc}{\contentsline {paragraph}{Shaping penalties express soft behavioral preferences.}{7}{section*.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Clipping controls the influence of frequent feedback.}{7}{section*.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Limits of the design and its justification.}{7}{section*.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.5}Task-specific reward profiles}{7}{subsection.2.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Coin collection.}{7}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {1.6.3}Action masking and hand-designed guidance}{6}{subsubsection.1.6.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {1.6.4}Reward shaping}{7}{subsubsection.1.6.4}\protected@file@percent }
+\newlabel{sec:reward-design}{{1.6.4}{7}{Reward shaping}{subsubsection.1.6.4}{}}
+\@writefile{toc}{\contentsline {paragraph}{Main rewards}{7}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Shaping penalties}{7}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {1.6.5}Task-specific reward profiles}{7}{subsubsection.1.6.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Coin collection.}{7}{section*.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Crate exploration.}{7}{section*.7}\protected@file@percent }
 \citation{roderick2017implementing}
 \@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Reward profiles in \texttt  {train.py}. Event values are summed per transition; only the combined shaping contribution is clipped. A zero denotes an event with no assigned reward in that profile.}}{8}{table.5}\protected@file@percent }
 \newlabel{tab:reward-profiles}{{5}{8}{Reward profiles in \texttt {train.py}. Event values are summed per transition; only the combined shaping contribution is clipped. A zero denotes an event with no assigned reward in that profile}{table.5}{}}
-\@writefile{toc}{\contentsline {paragraph}{Crate exploration.}{8}{section*.9}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Competitive play.}{8}{section*.10}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.6}Optimization and training state}{8}{subsection.2.6}\protected@file@percent }
-\citation{roderick2017implementing}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.7}Evaluation and model selection}{9}{subsection.2.7}\protected@file@percent }
-\newlabel{eq:model-selection}{{11}{9}{Evaluation and model selection}{equation.2.11}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {3}Results and Discussion}{9}{section.3}\protected@file@percent }
-\newlabel{sec:results}{{3}{9}{Results and Discussion}{section.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Evaluation protocol}{9}{subsection.3.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Summary of the available evidence}{10}{subsection.3.2}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Results to be filled from evaluation logs. Dashes denote unavailable measurements, not zero. Specify the opponent lineup for every setting and add kills, win rate, and ties for the competitive comparison.}}{10}{table.6}\protected@file@percent }
-\newlabel{tab:results}{{6}{10}{Results to be filled from evaluation logs. Dashes denote unavailable measurements, not zero. Specify the opponent lineup for every setting and add kills, win rate, and ties for the competitive comparison}{table.6}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Interpretation and limitations}{10}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Competitive play.}{8}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {1.6.6}Optimization and training state}{8}{subsubsection.1.6.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {1.6.7}Evaluation and model selection}{8}{subsubsection.1.6.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Results and Discussion}{9}{section.2}\protected@file@percent }
+\newlabel{sec:results}{{2}{9}{Results and Discussion}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Ruehl based agent}{9}{subsection.2.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Best-model evaluation metrics across the six training stages. Values are taken from the corresponding \texttt  {Hyperparams.prm} snapshots.}}{9}{table.6}\protected@file@percent }
+\newlabel{tab:training-stage-results}{{6}{9}{Best-model evaluation metrics across the six training stages. Values are taken from the corresponding \texttt {Hyperparams.prm} snapshots}{table.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Best model-selection score as a function of games played in each training stage. The evaluations take place every 200 games, and the current best model is saved if its score improves. The scores of the best models at each checkpoint are reported in Table\nobreakspace  {}\ref  {tab:training-stage-results}.}}{9}{figure.1}\protected@file@percent }
+\newlabel{fig:best-score-stages}{{1}{9}{Best model-selection score as a function of games played in each training stage. The evaluations take place every 200 games, and the current best model is saved if its score improves. The scores of the best models at each checkpoint are reported in Table~\ref {tab:training-stage-results}}{figure.1}{}}
 \bibstyle{plainnat}
 \bibdata{bib/references}
-\bibcite{ng1999shaping}{{1}{1999}{{Ng et~al.}}{{Ng, Harada, and Russell}}}
-\bibcite{roderick2017implementing}{{2}{2017}{{Roderick et~al.}}{{Roderick, MacGlashan, and Tellex}}}
-\bibcite{vanhasselt2015double}{{3}{2015}{{van Hasselt et~al.}}{{van Hasselt, Guez, and Silver}}}
-\bibcite{wang2016dueling}{{4}{2016}{{Wang et~al.}}{{Wang, Schaul, Hessel, van Hasselt, Lanctot, and de~Freitas}}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Conclusion}{11}{subsection.3.4}\protected@file@percent }
-\gdef \@abspage@last{11}
+\bibcite{roderick2017implementing}{{1}{2017}{{Roderick et~al.}}{{Roderick, MacGlashan, and Tellex}}}
+\bibcite{vanhasselt2015double}{{2}{2015}{{van Hasselt et~al.}}{{van Hasselt, Guez, and Silver}}}
+\bibcite{wang2016dueling}{{3}{2016}{{Wang et~al.}}{{Wang, Schaul, Hessel, van Hasselt, Lanctot, and de~Freitas}}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Conclusion}{10}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Conclusion}{10}{section.3}\protected@file@percent }
+\gdef \@abspage@last{10}
