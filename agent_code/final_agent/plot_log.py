@@ -10,18 +10,23 @@ with log_path.open() as log:
             continue
 
         payload = line.split("[ROLLING_STATS] ", 1)[1]
+
+        # Repair the missing separator in older log entries.
+        payload = payload.replace("suicide_ratio=", " suicide_ratio=")
+
         fields = dict(item.split("=", 1) for item in payload.split())
         rows.append({key: float(value) for key, value in fields.items()})
+      
 
 if not rows:
     raise ValueError("No ROLLING_STATS entries found.")
 
 metrics = [
-    ("coins", "Average coins"),
-    ("kills", "Average kills"),
-    ("crates", "Average crates"),
+    ("avg_coins", "Average coins"),
+    ("avg_kills", "Average kills"),
+    ("avg_crates", "Average crates"),
     ("suicide_ratio", "Suicide ratio"),
-    ("survived_steps", "Average steps in survived rounds"),
+    ("avg_survived_steps", "Average steps in survived rounds"),
 ]
 
 steps = [row["steps"] for row in rows]
@@ -34,7 +39,7 @@ for ax, (key, label) in zip(axes, metrics):
 
 axes[3].set_ylim(0, 1)
 axes[-1].set_xlabel("Training steps since process start")
-fig.suptitle("Rolling averages over the last 10 rounds")
+fig.suptitle("Rolling averages over the last 10 rounds in loot crate environment")
 fig.tight_layout()
-fig.savefig("final_agent_learning_curves.png", dpi=200)
+fig.savefig("final_agent_learning_curves_loot_crate.png", dpi=200)
 plt.show()

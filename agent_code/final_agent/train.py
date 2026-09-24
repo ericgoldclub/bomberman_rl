@@ -456,7 +456,7 @@ def log_round_metrics(self, last_game_state, events, transition_already_stored):
     avg_survived_steps = sum(survived_steps) / len(survived_steps) if survived_steps else float('nan')
 
     self.logger.info("[ROLLING_STATS] round=%d steps=%d window=%d "
-                    "avg_coins=%.2f avg_kills=%.2f avg_crates=%.2f"
+                    "avg_coins=%.2f avg_kills=%.2f avg_crates=%.2f "
                     "suicide_ratio=%.2f avg_survived_steps=%.2f survived_rounds=%d",
                     self.logged_rounds,
                     self.logged_env_steps,
