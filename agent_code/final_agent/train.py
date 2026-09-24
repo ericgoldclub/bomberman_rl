@@ -1,6 +1,6 @@
 import os
 import random
-from collections import deque, namedtuple
+from collections import Counter, deque, namedtuple
 from typing import List
 
 import numpy as np
@@ -148,7 +148,15 @@ class HybridDQN(nn.Module):
 
 
 def setup_training(self):
-    """Initialise training-related objects for the agent."""
+    """Setup logging relted metrics and counts"""
+
+    self.round_event_counts = Counter()
+    self.recent_round_metrics = deque(maxlen=10)
+    self.logged_rounds = 0
+    self.logged_env_steps = 0
+
+
+    
     # Replay buffer
     self.replay_buffer = deque(maxlen=BUFFER_SIZE)
     self.steps_done = 0#
@@ -240,6 +248,9 @@ def optimize_model(self):
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """Called once per step to allow intermediate rewards based on game events and to store transitions."""
+    # Record game events before reward-shaping events are added.
+    self.round_event_counts.update(events)
+
     if not hasattr(self, 'position_history'):
         self.position_history = deque(maxlen=4)
 
@@ -390,10 +401,13 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             events.append(e.STAYED_IN_OWN_BLAST)
 
     
+    
     # Update counters and train only every n environment steps.
     self.steps_done += 1
     events.append(e.STEP_PENALTY)  # Add a small penalty for each step to encourage faster completion
     reward = reward_from_events(self, events)
+
+    
 
     # Store transition
     if old_state is not None:
@@ -410,6 +424,53 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
 
+
+def log_round_metrics(self, last_game_state, events, transition_already_stored):
+
+    if not transition_already_stored:
+        self.round_event_counts.update(events)
+
+    survived = e.SURVIVED_ROUND in events
+
+    self.recent_round_metrics.append({
+        "coins": self.round_event_counts[e.COIN_COLLECTED],
+        "crates": self.round_event_counts[e.CRATE_DESTROYED],
+        "kills": self.round_event_counts[e.KILLED_OPPONENT],
+        "suicide": int(self.round_event_counts[e.KILLED_SELF] > 0),
+        "survived_steps": (last_game_state.get('step') if survived and last_game_state is not None else None),
+    })
+
+
+    self.logged_rounds += 1
+    if last_game_state is not None:
+        self.logged_env_steps += int(last_game_state["step"])
+
+    window = self.recent_round_metrics
+    count = len(window)
+
+    avg_coins = sum(m["coins"] for m in window) / count
+    avg_kills = sum(m["kills"] for m in window) / count
+    avg_crates = sum(m["crates"] for m in window) / count
+    suicide_ratio = sum(m["suicide"] for m in window) / count
+    survived_steps = [m["survived_steps"] for m in window if m["survived_steps"] is not None]
+    avg_survived_steps = sum(survived_steps) / len(survived_steps) if survived_steps else float('nan')
+
+    self.logger.info("[ROLLING_STATS] round=%d steps=%d window=%d "
+                    "avg_coins=%.2f avg_kills=%.2f avg_crates=%.2f"
+                    "suicide_ratio=%.2f avg_survived_steps=%.2f survived_rounds=%d",
+                    self.logged_rounds,
+                    self.logged_env_steps,
+                    count,
+                    avg_coins,
+                    avg_kills,
+                    avg_crates,
+                    suicide_ratio,
+                    avg_survived_steps,
+                    len(survived_steps)
+                      )
+
+    self.round_event_counts.clear()  # Reset the event counts for the next round
+
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """Called at the end of each game to handle final transition and save model."""
     last_state = getattr(self, 'last_features', None)
@@ -422,7 +483,12 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         and self.last_transition_step == last_game_state.get('step')
         and self.last_transition_action == last_action
     )
-
+    log_round_metrics(
+        self,
+        last_game_state,
+        events,
+        transition_already_stored,
+    )
     if transition_already_stored:
         # A surviving agent receives game_events_occurred for the final action
         # before end_of_round. Convert that existing transition to terminal
