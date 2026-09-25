@@ -182,6 +182,12 @@ def setup_training(self):
             self.policy_net.load_state_dict(state['model_state_dict'])
             self.target_net.load_state_dict(state['model_state_dict'])
             self.steps_done = int(round(float(state.get('steps_done', 0))))
+            self.logged_rounds = int(state.get("logged_rounds", 0))
+            self.logged_env_steps = int(state.get("logged_env_steps", 0))
+            self.recent_round_metrics = deque(
+                state.get("recent_round_metrics", []),
+                maxlen=10,
+            )
         else:
             self.policy_net.load_state_dict(state)
             self.target_net.load_state_dict(state)
@@ -522,6 +528,9 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # Save the policy network
     os.makedirs(os.path.dirname(MODEL_FILE), exist_ok=True)
     torch.save({
+        "logged_rounds": self.logged_rounds,
+        "logged_env_steps": self.logged_env_steps,
+        "recent_round_metrics": list(self.recent_round_metrics),
         "architecture_version": ARCHITECTURE_VERSION,
         "model_state_dict": self.policy_net.state_dict(),
         "steps_done": self.steps_done,

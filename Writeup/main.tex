@@ -458,6 +458,21 @@ Periodic evaluation ensures that model selection is based on up-to-date performa
 For coin collection and crate exploration, the selection is based on the actual game score rather than accumulated shaping rewards. 
 In competitive play, the selection score is extended by penalising self-destruction and favoring eliminating opponents.
 
+
+
+\subsection{The Final Agent}
+
+It should be noted that the final agent is only final by name and was not the submitted agent for the competition.\\
+The final agent is based on the same DQN architecture and training curriculum as the Ruehl based agent, but with some modifications to the input representation and reward shaping. The intention behind the final agent was to explore the impact of a bigger Network architecture, and to investigate the effect of a different reward shaping strategie and the use of a more guided action mask on the agent's performance.\\
+Compared to the Ruehl based agent, the final agent uses a larger network with more convolutional layers and filters, allowing it to capture more complex spatial relationships in the game environment. Additionally, the final agent incorporates a more sophisticated reward shaping strategy that takes into account not only the immediate rewards but also the long-term consequences of actions, encouraging the agent to develop more strategic behaviors. It also incorporates a more guided action mask that restricts the agent's actions based on the current game state, helping it to avoid dangerous situations and make more informed decisions.
+
+\subsubsection{Neural Network Architecture}
+
+The final agent's network architecture is similar to the Ruehl based agent, but with some modifications to the convolutional layers and the fully connected layers. \\
+It is based on the same two headed logic, where a CNN evaluates the spatial features and a fully connected network evaluates the scalar features. The outputs of both networks are then concatenated and passed through a series of fully connected layers to produce the final Q-values for each action.\\
+
+
+
 \FloatBarrier
 
 \section{Results and Discussion}

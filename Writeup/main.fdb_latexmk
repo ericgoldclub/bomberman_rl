@@ -1,14 +1,14 @@
 # Fdb version 4
-["bibtex main"] 1790262317.08849 "main.aux" "main.bbl" "main" 1790262318.48201 0
+["bibtex main"] 1790328251.22745 "main.aux" "main.bbl" "main" 1790328253.13819 0
   "./bib/references.bib" 1789735448.2677 1922 feab376881437d038462c50ce258d7fa ""
   "/usr/share/texmf-dist/bibtex/bst/natbib/plainnat.bst" 1775415801 26816 ffe5423d2019860bad9f54bc402fac15 ""
-  "main.aux" 1790262318.12008 7653 1c9a99fc9c7b7b057d4c7d937298af90 "pdflatex"
+  "main.aux" 1790328252.57917 7921 1fba52554e92402f81745ba676b1e3b8 "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1790262317.19646 "/home/eric/pythonprojekte/MLE/Bomberman_rl/bomberman_rl/Writeup/main.tex" "main.pdf" "main" 1790262318.48233 0
-  "/home/eric/pythonprojekte/MLE/Bomberman_rl/bomberman_rl/Writeup/main.tex" 1790256900.338 30876 27f3e389932f292fd3be53312b76e342 ""
+["pdflatex"] 1790328251.35497 "/home/eric/pythonprojekte/MLE/Bomberman_rl/bomberman_rl/Writeup/main.tex" "main.pdf" "main" 1790328253.13861 0
+  "/home/eric/pythonprojekte/MLE/Bomberman_rl/bomberman_rl/Writeup/main.tex" 1790328250.11419 32599 4215eaaa6d7117e37291ca41ceeecc41 ""
   "/usr/share/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1775415801 2971 def0b6c1f0b107b3b936def894055589 ""
   "/usr/share/texmf-dist/fonts/map/fontname/texfonts.map" 1775415801 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texmf-dist/fonts/tfm/jknappen/ec/ecbx1000.tfm" 1775415801 3584 2d666ecf6d466d8b007246bc2f94d9da ""
@@ -138,10 +138,10 @@
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1783781383 5385594 49de8b7fb62a04988f23900f74455602 ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1790257277 2328191 2c9e99506a345a26c07bf4b618ef476c ""
   "figures/best_model_score_by_stage.pdf" 1790256900.33622 21186 ebfff4670aa8751a0b9527f1770d18f7 ""
-  "main.aux" 1790262318.12008 7653 1c9a99fc9c7b7b057d4c7d937298af90 "pdflatex"
-  "main.bbl" 1790262317.19009 1513 386ac0e4bf8af961fda77aaea36ead59 "bibtex main"
-  "main.out" 1790262318.12208 3822 858d180ff735f8f5b528f58c2c7dacce "pdflatex"
-  "main.tex" 1790256900.338 30876 27f3e389932f292fd3be53312b76e342 ""
+  "main.aux" 1790328252.57917 7921 1fba52554e92402f81745ba676b1e3b8 "pdflatex"
+  "main.bbl" 1790328251.34818 1513 386ac0e4bf8af961fda77aaea36ead59 "bibtex main"
+  "main.out" 1790328252.58117 4170 6c8cb51f55fe7357b4c5fbe7d5c4e3d9 "pdflatex"
+  "main.tex" 1790328250.11419 32599 4215eaaa6d7117e37291ca41ceeecc41 ""
   (generated)
   "main.aux"
   "main.log"

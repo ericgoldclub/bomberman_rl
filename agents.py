@@ -248,7 +248,7 @@ class AgentRunner:
                 os.makedirs(log_dir)
             handler = logging.FileHandler(
                 f'{log_dir}{self.agent_name}.log',
-                mode="w",
+                mode="a",
             )
             handler.setLevel(logging.DEBUG if train else logging.WARNING)
         formatter = logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s')

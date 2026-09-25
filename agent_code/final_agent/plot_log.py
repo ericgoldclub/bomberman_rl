@@ -21,6 +21,15 @@ with log_path.open() as log:
 if not rows:
     raise ValueError("No ROLLING_STATS entries found.")
 
+# Find the most recent restart of the step counter.
+start_index = 0
+
+for i in range(1, len(rows)):
+    if rows[i]["steps"] <= rows[i - 1]["steps"]:
+        start_index = i
+
+rows = rows[start_index:]
+
 metrics = [
     ("avg_coins", "Average coins"),
     ("avg_kills", "Average kills"),
@@ -39,7 +48,8 @@ for ax, (key, label) in zip(axes, metrics):
 
 axes[3].set_ylim(0, 1)
 axes[-1].set_xlabel("Training steps since process start")
-fig.suptitle("Rolling averages over the last 10 rounds in loot crate environment")
+axes[-1].set_ylabel("Training steps")
+fig.suptitle("Rolling averages over the last 10 rounds") #in 300 rounds of loot crate and 300 rounds of classic against 3 rule_based_agents")
 fig.tight_layout()
 fig.savefig("final_agent_learning_curves_loot_crate.png", dpi=200)
 plt.show()
