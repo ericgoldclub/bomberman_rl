@@ -1,14 +1,14 @@
 # Fdb version 4
-["bibtex main"] 1790328251.22745 "main.aux" "main.bbl" "main" 1790328253.13819 0
-  "./bib/references.bib" 1789735448.2677 1922 feab376881437d038462c50ce258d7fa ""
+["bibtex main"] 1790464148.73522 "main.aux" "main.bbl" "main" 1790464150.94823 0
+  "./bib/references.bib" 1790462491.80124 1922 feab376881437d038462c50ce258d7fa ""
   "/usr/share/texmf-dist/bibtex/bst/natbib/plainnat.bst" 1775415801 26816 ffe5423d2019860bad9f54bc402fac15 ""
-  "main.aux" 1790328252.57917 7921 1fba52554e92402f81745ba676b1e3b8 "pdflatex"
+  "main.aux" 1790464150.73472 12240 e9ad4b45c125a493e322d472a289bd5c "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1790328251.35497 "/home/eric/pythonprojekte/MLE/Bomberman_rl/bomberman_rl/Writeup/main.tex" "main.pdf" "main" 1790328253.13861 0
-  "/home/eric/pythonprojekte/MLE/Bomberman_rl/bomberman_rl/Writeup/main.tex" 1790328250.11419 32599 4215eaaa6d7117e37291ca41ceeecc41 ""
+["pdflatex"] 1790464148.80862 "/home/eric/pythonprojekte/MLE/Bomberman_rl/bomberman_rl/Writeup/main.tex" "main.pdf" "main" 1790464150.9486 0
+  "/home/eric/pythonprojekte/MLE/Bomberman_rl/bomberman_rl/Writeup/main.tex" 1790464145.72272 57344 4bab0e887ffed1bbe503551672956b93 ""
   "/usr/share/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1775415801 2971 def0b6c1f0b107b3b936def894055589 ""
   "/usr/share/texmf-dist/fonts/map/fontname/texfonts.map" 1775415801 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texmf-dist/fonts/tfm/jknappen/ec/ecbx1000.tfm" 1775415801 3584 2d666ecf6d466d8b007246bc2f94d9da ""
@@ -22,6 +22,7 @@
   "/usr/share/texmf-dist/fonts/tfm/jknappen/ec/ecrm1200.tfm" 1775415801 3584 f80ddd985bd00e29e9a6047ebd9d4781 ""
   "/usr/share/texmf-dist/fonts/tfm/jknappen/ec/ecrm1440.tfm" 1775415801 3584 3169d30142b88a27d4ab0e3468e963a2 ""
   "/usr/share/texmf-dist/fonts/tfm/jknappen/ec/ecrm1728.tfm" 1775415801 3584 3c76ccb63eda935a68ba65ba9da29f1a ""
+  "/usr/share/texmf-dist/fonts/tfm/jknappen/ec/ecti1000.tfm" 1775415801 3072 3bce340d4c075dffe6d4ec732b4c32fe ""
   "/usr/share/texmf-dist/fonts/tfm/jknappen/ec/ecti1095.tfm" 1775415801 3072 b73d2778cc3af44970de4de5e032d7f6 ""
   "/usr/share/texmf-dist/fonts/tfm/jknappen/ec/ectt0800.tfm" 1775415801 1536 0b0b8ca286de6a006b681926403f35cd ""
   "/usr/share/texmf-dist/fonts/tfm/jknappen/ec/ectt1000.tfm" 1775415801 1536 06717a2b50de47d4087ac0e6cd759455 ""
@@ -50,9 +51,11 @@
   "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb" 1775415801 30251 6afa5cb1d0204815a708a080681d4674 ""
   "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb" 1775415801 36299 5f9df58c2139e7edcf37c8fca4bd384d ""
   "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb" 1775415801 37166 8ab3487cbe3ab49ebce74c29ea2418db ""
+  "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb" 1775415801 36281 c355509802a035cadc5f15869451dcee ""
   "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb" 1775415801 35469 70d41d2b9ea31d5d813066df7c99281c ""
   "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb" 1775415801 35752 024fb6c41858982481f6968b5fc26508 ""
   "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb" 1775415801 32734 69e00a6b65cedb993666e42eedb3d48f ""
+  "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb" 1775415801 32762 224316ccc9ad3ca0423a14971cfa7fc1 ""
   "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb" 1775415801 32726 0a1aea6fcd6468ee2cf64d891f5c43c8 ""
   "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb" 1775415801 32569 5e5ddc8df908dea60932f3c484a54c0d ""
   "/usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb" 1775415801 32587 1788b0c1c5b39540c96f5e42ccd6dae8 ""
@@ -67,6 +70,7 @@
   "/usr/share/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb" 1775415801 145929 f25e56369a345c4ff583b067cd87ce8e ""
   "/usr/share/texmf-dist/fonts/type1/public/cm-super/sfrm1200.pfb" 1775415801 136101 f533469f523533d38317ab5729d00c8a ""
   "/usr/share/texmf-dist/fonts/type1/public/cm-super/sfrm1728.pfb" 1775415801 131438 3aa300b3e40e5c8ba7b4e5c6cebc5dd6 ""
+  "/usr/share/texmf-dist/fonts/type1/public/cm-super/sfti1000.pfb" 1775415801 186554 e8f0fa8ca05e038f257a06405232745f ""
   "/usr/share/texmf-dist/fonts/type1/public/cm-super/sfti1095.pfb" 1775415801 196446 8fbbe4b97b83e5182def6d29a44e57fb ""
   "/usr/share/texmf-dist/fonts/type1/public/cm-super/sftt1000.pfb" 1775415801 169201 9ebf99020dde51a5086e186761a34e8f ""
   "/usr/share/texmf-dist/fonts/type1/public/cm-super/sftt1095.pfb" 1775415801 169670 48d12e69c9a3b23c81f6d703ccbd4554 ""
@@ -138,10 +142,12 @@
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1783781383 5385594 49de8b7fb62a04988f23900f74455602 ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1790257277 2328191 2c9e99506a345a26c07bf4b618ef476c ""
   "figures/best_model_score_by_stage.pdf" 1790256900.33622 21186 ebfff4670aa8751a0b9527f1770d18f7 ""
-  "main.aux" 1790328252.57917 7921 1fba52554e92402f81745ba676b1e3b8 "pdflatex"
-  "main.bbl" 1790328251.34818 1513 386ac0e4bf8af961fda77aaea36ead59 "bibtex main"
-  "main.out" 1790328252.58117 4170 6c8cb51f55fe7357b4c5fbe7d5c4e3d9 "pdflatex"
-  "main.tex" 1790328250.11419 32599 4215eaaa6d7117e37291ca41ceeecc41 ""
+  "figures/final_agent_learning_curves_classic.png" 1790442764.12945 601367 eb1659d18e33bc2a91398780e1909541 ""
+  "figures/final_agent_loot_crate_learning_curves.png" 1790442972.71056 312088 817e2374d466b893cf582b03f4ace8ef ""
+  "main.aux" 1790464150.73472 12240 e9ad4b45c125a493e322d472a289bd5c "pdflatex"
+  "main.bbl" 1790464148.80473 1513 386ac0e4bf8af961fda77aaea36ead59 "bibtex main"
+  "main.out" 1790464150.73572 4730 a0a0e01a7cdb3dc75a3b1e244187d540 "pdflatex"
+  "main.tex" 1790464145.72272 57344 4bab0e887ffed1bbe503551672956b93 ""
   (generated)
   "main.aux"
   "main.log"

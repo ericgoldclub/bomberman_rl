@@ -465,13 +465,358 @@ In competitive play, the selection score is extended by penalising self-destruct
 It should be noted that the final agent is only final by name and was not the submitted agent for the competition.\\
 The final agent is based on the same DQN architecture and training curriculum as the Ruehl based agent, but with some modifications to the input representation and reward shaping. The intention behind the final agent was to explore the impact of a bigger Network architecture, and to investigate the effect of a different reward shaping strategie and the use of a more guided action mask on the agent's performance.\\
 Compared to the Ruehl based agent, the final agent uses a larger network with more convolutional layers and filters, allowing it to capture more complex spatial relationships in the game environment. Additionally, the final agent incorporates a more sophisticated reward shaping strategy that takes into account not only the immediate rewards but also the long-term consequences of actions, encouraging the agent to develop more strategic behaviors. It also incorporates a more guided action mask that restricts the agent's actions based on the current game state, helping it to avoid dangerous situations and make more informed decisions.
+\subsubsection{The Features}
+The features used for this Network are one of the main differences between the Ruehl based agent and the final agent.\\
+The spatial input consists of fourteen \(17\times17\) feature maps containing information such as walls, crates, coins, agent positions, and bomb-related danger. Each one of these maps is designed to capture only one spatial aspect of the game state, which resulted in 14 different channels of information which are summarized in Table~\ref{tab:final-agent-spatial-features}.
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}r>{\raggedright\arraybackslash}p{4.2cm}Y@{}}
+\toprule
+Channel & Feature & Encoding \\
+\midrule
+0 & Walls & Binary map of indestructible walls. \\
+1 & Crates & Binary map of destructible crates. \\
+2 & Coins & Binary map of visible coins. \\
+3 & Own position & One-hot encoding of the agent's current tile. \\
+4 & Useful bomb positions & Binary map of free tiles where placing a bomb could hit a crate. \\
+5 & Bomb timers & Remaining timer divided by 4 at each bomb's position; zero elsewhere. \\
+6 & Bomb danger & Binary map of tiles within the blast area of any existing bomb, regardless of its timer. \\
+7 & Active explosions & Binary map indicating where \texttt{explosion\_map}$>0$. \\
+8 & Free terrain & Binary map indicating where \texttt{field}$=0$; tiles may still contain bombs or agents. \\
+9 & Opponent positions & Binary map of opponents' current tiles. \\
+10 & Explosion urgency & $1-t_{\min}/4$ at threatened tiles, where $t_{\min}$ is the smallest timer among bombs whose blasts cover that tile; zero elsewhere. \\
+11 & Safe neighboring tiles & Binary map of adjacent tiles for which the survival search finds a surviving continuation after moving there. \\
+12 & Own hypothetical blast & Binary map of tiles affected by a hypothetical bomb at the agent's current position. \\
+13 & Opponents' hypothetical blasts & Binary map of tiles affected by hypothetical bombs at opponents' current positions. \\
+\bottomrule
+\end{tabularx}
+\caption{The final agent's fourteen spatial input channels.
+Each channel has dimensions $17\times17$.
+Channel indices follow the implementation in \texttt{callbacks.py}.}
+\label{tab:final-agent-spatial-features}
+\end{table}
+The scalar input consists of twenty-two features, which are summarized in Table~\ref{tab:final-agent-scalar-features}. They give the network scalar information that break isotropy which is one of the biggest differences between the final agent and the Ruehl based agent. This was done to guide the agent more during the training process and to achieve a faster convergence of the training. This was done despite the risk of overfitting and will be later discussed in the conclusions section.
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}r>{\raggedright\arraybackslash}p{4.2cm}Y@{}}
+\toprule
+Index & Feature & Encoding \\
+\midrule
+0 & Coin direction, $x$ & Suggested next step's $x$-offset toward a coin, divided by 17. \\
+1 & Coin direction, $y$ & Suggested next step's $y$-offset toward a coin, divided by 17. \\
+2 & Crate-target direction, $x$ & Suggested next step's $x$-offset toward a useful bomb position, divided by 17. \\
+3 & Crate-target direction, $y$ & Suggested next step's $y$-offset toward a useful bomb position, divided by 17. \\
+4 & Crate within bomb range & Binary indicator that a bomb at the current position could hit a crate. \\
+5 & Bomb availability & Integer value of \texttt{bombs\_left}. \\
+6 & Current danger & Binary indicator that the current tile lies in an existing bomb's blast area or an active explosion. \\
+7 & Safe movement available & Binary indicator that at least one movement action has a surviving continuation. \\
+8 & Previous position, $x$ & $(x_{\mathrm{previous}}-x)/17$. \\
+9 & Previous position, $y$ & $(y_{\mathrm{previous}}-y)/17$. \\
+10 & Two positions back, $x$ & $(x_{\mathrm{two\ back}}-x)/17$. \\
+11 & Two positions back, $y$ & $(y_{\mathrm{two\ back}}-y)/17$. \\
+12 & Round progress & Current step divided by 400. \\
+13 & Closest opponent distance & Minimum Manhattan distance to an opponent, divided by 17; set to 2 if no opponents remain. \\
+14 & Opponent within bomb range & Binary indicator that a bomb at the current position could hit an opponent. \\
+15 & Survival after bomb placement & Binary indicator that the search finds a surviving path after placing a bomb and remaining on the current tile for that action. \\
+16 & Potential attacking opportunity & Binary conjunction of opponent within bomb range and survival after bomb placement. \\
+17 & Predicted trapped opponent & Binary indicator that an opponent lies in the proposed bomb's blast area and the search finds no escape for that opponent. \\
+18 & Opponent direction, $x$ & Suggested next step's $x$-offset toward an opponent, divided by 17. \\
+19 & Opponent direction, $y$ & Suggested next step's $y$-offset toward an opponent, divided by 17. \\
+20 & Remaining opponents & Number of opponents divided by 3. \\
+21 & Current score & Raw game score without normalization. \\
+\bottomrule
+\end{tabularx}
+\caption{The final agent's twenty-two scalar input features.
+Here, $(x,y)$ is the agent's current position.
+Direction features describe the next step suggested by the path search.
+Historical positions refer to recorded position changes, with consecutive
+repetitions omitted; missing history entries are encoded as zero.
+Indices follow the implementation in \texttt{callbacks.py}.}
+\label{tab:final-agent-scalar-features}
+\end{table}
 
 \subsubsection{Neural Network Architecture}
 
-The final agent's network architecture is similar to the Ruehl based agent, but with some modifications to the convolutional layers and the fully connected layers. \\
-It is based on the same two headed logic, where a CNN evaluates the spatial features and a fully connected network evaluates the scalar features. The outputs of both networks are then concatenated and passed through a series of fully connected layers to produce the final Q-values for each action.\\
+The final agent's network architecture is similar to the Ruehl based agent, but with some modifications to the convolutional layers and the fully connected layers.\\\\
+It is based on the same two headed logic, where a CNN evaluates the spatial features and a fully connected network evaluates the scalar features. The outputs of both networks are then concatenated and passed through a series of fully connected layers to produce the final Q-values for each action. In theory a simple CNN should be sufficient for this task, but we decided to add a fully connected network to potentially speed up the training process.\\
+Simply increasing the number of layers in the fully connected network and the CNN lead to a significant increase in the number of parameters, which slowwed down the training process and skewed the ratio of spatial to scalar features which resulted in a worse performance of the final agent. Another problem with that simple approach was the increase in dead neurons in the fully connected layers.\\
+After testing this simple approach, we decided to further increase the complexity of the so called\texttt{HybridDQN}.
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lYl@{}}
+\toprule
+Component & Operation & Output shape \\
+\midrule
+Board input & Fourteen spatial channels & $14\times17\times17$ \\
+Convolution 1 & $3\times3$, 32 filters, stride 1; GN, SiLU & $32\times17\times17$ \\
+Residual block 1 & Two $3\times3$ convolutions, 32 filters; skip connection & $32\times17\times17$ \\
+Convolution 2 & $3\times3$, 64 filters, stride 2; GN, SiLU & $64\times9\times9$ \\
+Residual block 2 & Two $3\times3$ convolutions, 64 filters; skip connection & $64\times9\times9$ \\
+Convolution 3 & $3\times3$, 96 filters, stride 2; GN, SiLU & $96\times5\times5$ \\
+Residual block 3 & Two $3\times3$ convolutions, 96 filters; skip connection & $96\times5\times5$ \\
+Flatten & Flatten the spatial features & $2400$ \\
+\midrule
+Scalar input & Twenty-two engineered features & $22$ \\
+Scalar branch & Linear $22\to64\to64$, LN and SiLU after each layer & $64$ \\
+\midrule
+Concatenation & Join spatial and scalar features & $2464$ \\
+Shared layers & Linear $2464\to512\to256$, LN and SiLU after each layer & $256$ \\
+Value head & Linear $256\to128\to1$, SiLU after the hidden layer & $1$ \\
+Advantage head & Linear $256\to128\to6$, SiLU after the hidden layer & $6$ \\
+Dueling output & $Q(s,a)=V(s)+A(s,a)-\frac{1}{6}\sum_{b=1}^{6}A(s,b)$ & $6$ \\
+\bottomrule
+\end{tabularx}
+\caption{Architecture of the final agent's \texttt{HybridDQN}.
+The batch dimension is omitted.
+GN denotes group normalization with eight groups; LN denotes layer normalization.
+All convolutions use padding 1.
+Each residual block uses stride 1 and applies
+convolution--GN--SiLU--convolution--GN, followed by addition of the
+block input and a final SiLU activation.}
+\label{tab:final-agent-network}
+\end{table}
 
+The final agent’s HybridDQN combines a convolutional neural network with a fully connected network to process two complementary representations of the game state. The convolutional branch extracts spatial patterns from the board, while the fully connected branch processes engineered features that describe relevant game situations explicitly. Their outputs are combined and passed to a dueling architecture, which estimates a shared state value and the relative advantages of individual actions.\\
+The first convolution transforms the 14 spatial feature maps into 32 feature maps while preserving their spatial dimensions. Two subsequent convolutional stages increase the number of channels to 64 and 96, respectively. These stages use a stride of two, reducing the spatial resolution first to \(9\times9\) and then to \(5\times5\). This lets the network combine information across increasingly large regions of the board while limiting the number of features passed to the fully connected layers. Each of these convolutions is followed by group normalization with eight groups and a SiLU activation. The SiLU function was chosen, because with ReLU we previously observed a significant number of dead neurons in the fully connected layers, which we hoped to prevent with the SiLU activation.\\
+Each convolutional stage also contains a residual block. A residual block processes its input through two additional convolutions and then adds the original input to their output. For an input tensor \(x\), the block computes
+\begin{equation}
+    ResBlock (x) = GN_2(Conv_2(SiLU(GN_1(Conv_1(x))))),
+\end{equation}
+followed by
+\begin{align}
+    y = SiLU(x + ResBlock(x)).
+\end{align}
+Both convolutions use \(3\times3\) kernels, stride one, and padding one. They preserve the number of channels and the spatial dimensions, so the input \(x\) and the transformed features \(F(x)\) can be added element by element. Consequently, the residual blocks preserve the shapes \(32\times17\times17\), \(64\times9\times9\), and \(96\times5\times5\), respectively. The resolution changes occur in the strided convolutions between the blocks.\\
+The addition of \(x\) to the output of the residual block allows the convolutional path to learn corrections or additions to an existing representation. For example, a block can refine features describing nearby crates by incorporating surrounding escape routes. During backpropagation, the addition also provides a direct path for gradients alongside the path through the convolutional layers, making it easier to train a deeper spatial encoder. This was implemented to allow the network to learn from a pretrained starting point, and to improve the learning of more complex spatial relationships.\\\\
+The fully connected branch takes the 22 engineered features as input and processes them through two linear layers with 64 hidden units each. Each layer is followed by layer normalization and a SiLU activation. The output of this branch is a 64-dimensional feature vector that captures relevant scalar information about the game state.\\\\
+This shared representation feeds two separate output heads that follow the idea of \citep{wang2016dueling}. The value head uses a fully connected layer from 256 to 128 units, a SiLU activation, and a final linear layer producing one scalar, \(V(s)\). This scalar provides a common baseline for all six action values. Centering this baseline around zero makes it possible to determine the deviation of each action from that baseline.\\
+\begin{equation}
+    Q(s,a)=V(s)+A(s,a)-\frac{1}{6}\sum_{b=1}^{6}A(s,b)
+\end{equation}
+The advantage head has the same hidden-layer structure, but its final layer produces six outputs, one for each action: moving up, right, down, or left, waiting, and placing a bomb. These outputs, \(A(s,a)\), describe relative action preferences. For example, when a bomb threatens the agent, moving toward a safe tile should receive a higher advantage than waiting. Both heads use linear output layers, allowing them to represent positive and negative values. 
 
+\subsubsection{The Action Mask}
+One of the main differences between the Ruehl based agent and the final agent is the use of a more guided action selection through the action mask. The intend was to reduce the amount of possible scenarios to only the ones that were legal moves and that did not lead to an immediate suicide of the agent. The reasoning behind that restrictive approach, was to reduce the training time.\\\\
+The final agent uses a hand-designed action mask to restrict action
+selection according to physical feasibility, predicted survival, and
+the usefulness of bomb placement. For each state, the mask assigns
+a Boolean value to each of the six actions.
+
+The survival check performs a breadth-first search, which was implemented from the rule based agent, over positions and
+future time steps, using a horizon of six steps. The first action is
+fixed to the candidate being evaluated; subsequent steps may contain
+any of the four movement actions or waiting. A candidate passes the
+check if at least one continuation survives the entire search horizon.
+The search accounts for walls, crates, bomb occupancy, bomb timers,
+and active explosions. Consequently, it can reject a move that is
+safe immediately but leads to an unavoidable explosion a few steps
+later.
+
+For bomb placement, the search inserts a hypothetical bomb at the
+agent's current position. The agent remains on that tile during the
+placement action, and the search then checks whether a surviving
+continuation exists. Bomb placement additionally requires an available
+bomb and a blast area that could reach at least one crate or opponent.
+Table~\ref{tab:final-agent-action-mask} summarizes the rules.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lY@{}}
+\toprule
+Action or stage & Rule \\
+\midrule
+Movement &
+Allow the action if the destination is traversable and the survival
+search finds a continuation lasting the full six-step horizon. \\
+
+\texttt{WAIT} &
+Allow waiting if remaining on the current tile for the first step
+permits a surviving continuation. \\
+
+\texttt{BOMB} &
+Allow placement if a bomb is available, its blast could reach a crate
+or opponent, and the survival search succeeds with the additional
+bomb included. \\
+
+\midrule
+First fallback &
+If the preceding rules reject every action, allow movement to
+adjacent tiles inside the board that contain no wall, crate, bomb,
+or opponent. Explosion danger is disregarded at this stage;
+waiting and bomb placement remain excluded. \\
+
+Final fallback &
+If no movement action passes the first fallback, allow
+\texttt{WAIT}, even if survival cannot be established. \\
+\bottomrule
+\end{tabularx}
+\caption{Action-mask rules of the final agent.
+The fallback stages are applied only when the preceding stage
+leaves no permitted action.}
+\label{tab:final-agent-action-mask}
+\end{table}
+
+The mask is applied during both exploration and exploitation.
+Exploration samples uniformly from the permitted actions.
+For greedy selection, excluded actions receive a temporary value
+of $-\infty$:
+\begin{equation}
+\widetilde{Q}(s,a)=
+\begin{cases}
+Q(s,a), & \text{if the mask permits } a,\\
+-\infty, & \text{otherwise}.
+\end{cases}
+\end{equation}
+The agent then selects the action maximizing
+$\widetilde{Q}(s,a)$. During Double DQN training, the next-state
+mask also restricts the online network's action selection when
+constructing the bootstrap target; the target network evaluates
+the selected action.
+
+The survival prediction uses a simplified model: terrain remains
+fixed during the search, opponents' current positions block only
+the first step, and future opponent movements and new bomb
+placements are not predicted. Together with the fallback rules,
+these assumptions mean that the mask cannot guarantee survival.
+It provides explicit guidance that contributes to the agent's
+behavior alongside the learned Q-values, while restricting
+exploration to actions admitted by its rules.
+
+\subsubsection{The Reward Shaping}
+One principle that guided the design of the final agent's reward shaping was the rule, that nothing could be rewarded or punished that was not directly observable for the agent, i.e the information that is beeing rewarded must be part of the input features of the network.\\\\
+The final agent combines rewards for game outcomes with smaller
+rewards for intermediate behavior. These intermediate signals provide
+feedback before an action sequence produces a measurable outcome.
+For example, destroying a crate and collecting the coin underneath
+requires the agent to approach a suitable position, place a bomb,
+escape its blast, and return after the explosion. Reward shaping
+provides feedback at several points in this sequence.
+
+The learning reward is constructed by summing the contributions of
+the events associated with a transition. Multiple contributions can
+therefore occur simultaneously: collecting a coin can coincide with
+movement-related rewards and the step penalty. Events without an
+assigned reward contribute zero. The current reward configuration is
+summarized in Table~\ref{tab:final-agent-rewards}.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}Yr@{}}
+\toprule
+Event or condition & Reward \\
+\midrule
+\multicolumn{2}{@{}l}{\textit{Game outcomes}} \\
+Opponent eliminated & $+25.00$ \\
+Coin collected & $+7.00$ \\
+Round survived & $+1.00$ \\
+Crate destroyed & $+0.10$ \\
+Coin revealed & $+0.05$ \\
+Suicide & $-20.00$ \\
+Got killed by an opponent & $-15.00$ \\
+\midrule
+\multicolumn{2}{@{}l}{\textit{Bomb placement and escape}} \\
+Bomb predicted to trap an opponent & $+0.75$ \\
+Bomb threatening an opponent without a predicted trap & $+0.30$ \\
+Bomb targeting a crate without threatening an opponent & $+0.20$ \\
+Bomb placement failing the preceding checks & $-0.50$ \\
+Leaving the tracked own bomb's blast area & $+0.30$ \\
+Remaining in that blast area without a predicted survival path & $-1.00$ \\
+\midrule
+\multicolumn{2}{@{}l}{\textit{Movement guidance}} \\
+Moving closer to a coin & $+0.05$ \\
+Moving farther from a coin & $-0.05$ \\
+Moving closer to an opponent & $+0.05$ \\
+Moving farther from an opponent & $-0.05$ \\
+Moving closer to a useful crate-bombing position & $+0.03$ \\
+Moving farther from a useful crate-bombing position & $-0.03$ \\
+\midrule
+\multicolumn{2}{@{}l}{\textit{Behavioral penalties}} \\
+Invalid action & $-1.00$ \\
+Waiting & $-0.05$ \\
+Returning to the position recorded two steps earlier & $-0.50$ \\
+Step cost on regular training transitions & $-0.01$ \\
+\bottomrule
+\end{tabularx}
+\caption{Reward configuration of the final agent.
+Positive bomb-placement rewards require a predicted survival path.
+Bomb-placement categories are mutually exclusive, and the
+self-destruction penalty replaces the ordinary death penalty.}
+\label{tab:final-agent-rewards}
+\end{table}
+
+Collecting coins and eliminating opponents receive substantially
+larger rewards than individual shaping events. This gives completed
+objectives greater weight than intermediate progress. Crate
+destruction and coin revelation receive smaller rewards because they
+create opportunities for later collection. These values define a
+learning objective with its own relative priorities: an opponent
+elimination is worth approximately $25/7 \approx 3.57$ collected coins.
+
+Death receives a substantial negative contribution. The implementation
+distinguishes self-destruction, penalized by $-20$, from other deaths,
+penalized by $-15$. Since self-destruction also generates the general
+death event, the reward function explicitly applies only the
+self-destruction penalty in this case. This prevents an unintended
+combined penalty of $-35$. Other rewards generated during the same
+transition still contribute to the total.
+
+Bomb-placement shaping distinguishes between predicted usefulness
+and confirmed success. A placement receives $+0.75$ if the agent has
+a predicted escape route and an opponent within the blast area is
+predicted to have no escape. If an opponent is threatened but no trap
+is predicted, the reward is $+0.30$. A placement targeting a crate
+receives $+0.20$ when an escape is predicted and no opponent is
+threatened. These conditions are evaluated in priority order, so a
+single placement receives only one placement classification.
+Placements failing these checks receive $-0.50$. The larger reward
+for an actual elimination is awarded separately when the outcome
+occurs.
+
+The agent also tracks its most recent bomb placement. Leaving that
+bomb's blast area produces a reward of $+0.30$. Remaining inside the
+area produces a penalty of $-1.00$ only when the survival search finds
+no surviving continuation. This condition allows temporary movement
+within the blast area while an escape remains possible.
+
+Movement shaping uses changes in Euclidean distance to coins,
+opponents, and positions from which a bomb could destroy a crate.
+Decreasing the distance produces a small positive reward, while
+increasing it produces a negative contribution. The crate-related
+target is therefore a useful placement position rather than the
+crate's occupied tile. These signals provide frequent directional
+feedback, although Euclidean distance does not account for obstacles
+or the length of a traversable route. When constructing therewards for the movements it is necessary to make sure that they aren't asymmetrical. If for example moving closer to a coin would be rewarded with +0.05, but moving away from a coin would be punished with -0.04, the agent culd simply move back and forth to collect a reward of +0.01, which would teach the agent oscillatory behaviour.
+
+Waiting and invalid actions receive penalties, and regular training
+transitions include a small step cost. The position-history check
+also penalizes a return to the position recorded two steps earlier.
+This discourages back-and-forth movement, but the same condition can
+also be satisfied by repeated waiting.
+
+As an illustrative example, a sequence involving a predicted-safe
+crate-targeting placement, leaving the blast area, destroying one
+crate, revealing one coin, and collecting that coin contributes
+\[
+0.20 + 0.30 + 0.10 + 0.05 + 7.00 = 7.65.
+\]
+This is the undiscounted sum of those event contributions; movement
+rewards, step costs, and other events would modify the sequence's
+total reward.
+
+The shaping terms also introduce trade-offs. A necessary detour may
+increase the distance to a target, and retreating from an opponent
+may be essential for survival. Waiting can likewise be appropriate
+while an explosion clears. Furthermore, repeated shaping rewards
+can accumulate because their combined contribution is not clipped.
+Evaluation should therefore examine game score, coin collection,
+eliminations, and survival alongside learning reward. Controlled
+comparisons with individual shaping terms removed would be needed
+to establish which components improve performance.
 
 \FloatBarrier
 
@@ -530,6 +875,22 @@ Table~\ref{tab:training-stage-results}.}
 
 
 \FloatBarrier
+
+\subsection{Final agent}
+The final agent was not the submitted agent for the competition, but was trained in parallel to the Ruehl based agent. Despite that it did not achieve the same level of performance as the Ruehl based agent. This will be demonstrated without showing the results of several thousand games, but rather a short version of it.\\\\
+The following two plots show the performance of the final agent as it was trained on 300 games of loot crate with 50 coins without an opponent, follwoed by around 600 games of classic with nine coins and with three rule based agents as opponents. In order to determine wether or not a completely new network would be able to improve, the rolling average of the coins collected, the opponents killed, the crates destroyed, the score, the suicide ratio and the steps until the game ends were calculated over the last 10 games. Figure \ref{fig:final-agent-learning-curves} shows these plots.\\ 
+As can be seen, during the training in loot crate,the network made constant improvements over the duration of the 300 rounds. The plots showing the classic games, however show that the network had significant trouble adapting to a much more complex tranining environment. Despite double the training and the previous knowledge, from the loot crate training, the score only shows a very slight upwards trend and no improvment in the kill-ability.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.49\textwidth]{figures/final_agent_loot_crate_learning_curves.png}%
+    \hfill
+    \includegraphics[width=0.49\textwidth]{figures/final_agent_learning_curves_classic.png}
+    \caption{Learning curves of the final agent: loot-crate without opponents
+    (left) and classic with three rule-based opponents (right).}
+    \label{fig:final-agent-learning-curves}
+\end{figure}
+\FloatBarrier
+
 
 \subsection{Conclusion}
 \section{Conclusion}
