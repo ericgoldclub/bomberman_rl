@@ -1,0 +1,24 @@
+\begin{table}[htbp]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{@{}Yrrrrrrr@{}}
+\toprule
+Configuration & Games & Score [95\% CI] & Coins & Kills & \shortstack{Self-\\destruction (\%)} & \shortstack{Survived\\(\%)} & \shortstack{Leader\\share (\%)} \\
+\midrule
+\multicolumn{8}{@{}l}{\textit{Three rule-based opponents}} \\
+Final Q + temporal mask & 200 & 1.95 [1.66, 2.25] & 1.295 & 0.130 & 54.0 & 45.0 & 15.4 \\
+Final Q + RUEHL mask & 200 & 0.57 [0.42, 0.73] & 0.520 & 0.010 & 90.5 & 3.0 & 2.4 \\
+Random + temporal mask & 200 & 1.09 [0.85, 1.34] & 0.590 & 0.100 & 43.0 & 43.5 & 5.4 \\
+Random + RUEHL mask & 200 & 0.15 [0.10, 0.21] & 0.150 & 0.000 & 97.0 & 0.5 & 0.0$^{\dagger}$ \\
+\addlinespace
+\multicolumn{8}{@{}l}{\textit{Mixed opponent population}} \\
+Final Q + temporal mask & 200 & 2.64 [2.29, 3.02] & 1.415 & 0.245 & 44.0 & 51.5 & 10.2 \\
+Final Q + RUEHL mask & 200 & 0.51 [0.39, 0.64] & 0.480 & 0.005 & 98.0 & 1.0 & 0.5 \\
+Random + temporal mask & 200 & 1.14 [0.91, 1.39] & 0.665 & 0.095 & 31.5 & 63.0 & 2.0 \\
+Random + RUEHL mask & 200 & 0.15 [0.10, 0.21] & 0.155 & 0.000 & 98.5 & 0.0 & 0.0$^{\dagger}$ \\
+\addlinespace
+\bottomrule
+\end{tabularx}
+\caption{Episode means from 200 games per row; score brackets are 95\% episode-bootstrap intervals. Other columns are point estimates, with intervals retained in the supplementary JSON. Score-leader share splits credit among tied highest final scores, including dead agents. Inference is conditional on one checkpoint and the stated opponents. $^{\dagger}$The degenerate all-zero bootstrap interval is suppressed; zero score-leading episodes among 200 games gives a Wilson upper bound of 1.9\% on leader presence, which also bounds expected fractional share.}
+\label{tab:jesper-frozen-evaluation}
+\end{table}

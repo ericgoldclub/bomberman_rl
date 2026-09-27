@@ -1,0 +1,20 @@
+\section{Project planning}
+\label{sec:jesper-planning}
+\contributionauthor{Jesper Eggers}
+Each group member primarily owns their report sections. The project maintains
+two agent implementations and a staged training workflow: transfer from saved
+weights, alternate training and greedy evaluation, then archive the
+best model and parameter snapshot. Training logs record two
+30,000-round RUEHL continuation stages, lasting 8:47:59 and 8:03:33.
+Their 180/20 schedule nominally allocates 27,000 rounds to training and
+3,000 to evaluation per stage; these are played-round budgets, not counts
+of optimization updates.
+
+The final evaluation stage freezes the final network and varies its
+action-selection components. This separates model development from
+assessing what each deployed component contributes, while keeping the
+evaluation workload finite before the report deadline. The paired-game
+design gives each configuration the same initial conditions, and the
+analysis connects game scores to survival and action-selection behavior. The
+organizational lesson is to preserve source revisions, model hashes,
+per-episode evaluations, and hardware records together at each milestone.

@@ -1,0 +1,1020 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,tabularx,array}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{xcolor}
+\usepackage{placeins,needspace,etoolbox}
+\usepackage[hidelinks]{hyperref}
+
+
+\newcommand{\todo}[1]{\par\smallskip\noindent\textcolor{red!65!black}{\textbf{TODO:} #1}\par\smallskip}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\setlength{\emergencystretch}{2em}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.65em}
+
+\title{Deep Reinforcement Learning for Bomberman}
+\author{\texttt{Eric Flämig, Mark Salzmann, Jesper Eggers}}
+\date{\today}
+
+
+\newcommand{\contributionauthor}[1]{{\small\textit{Main author: #1}\par}}
+\newcommand{\contributionauthors}[1]{{\small\textit{Main authors: #1}\par}}
+\newcommand{\contributioninput}[1]{\begingroup
+\let\section\subsection\let\subsection\subsubsection\input{#1}\endgroup}
+\widowpenalty=10000
+\clubpenalty=10000
+\pretocmd{\section}{\Needspace{10\baselineskip}}{}{}
+\pretocmd{\subsection}{\Needspace{8\baselineskip}}{}{}
+\pretocmd{\subsubsection}{\Needspace{8\baselineskip}}{}{}
+
+
+
+\begin{document}
+\maketitle
+\input{sections/environment}
+\begin{abstract}
+We develop two Double DQN Bomberman agents with different allocations of
+learned decisions and explicit guidance. A 3,000-state engine-based audit
+and 1,600 frozen-policy games distinguish escape feasibility from competitive
+performance. With final-agent weights fixed, replacing the RUEHL mask
+with the temporal mask adds 1.375 points per game against rule-based opponents; learned
+ranking adds 0.855 points beyond temporal masked random play while increasing
+self-destruction. A replayed opponent collision exposes why conditional
+escape search cannot guarantee safety. Together, these experiments connect
+engine-conditional escape feasibility with learned choices and competitive outcomes.
+\end{abstract}
+\input{sections/context}
+\section{Background}\label{sec:theory}
+\contributionauthor{Mark Salzmann}
+
+
+\subsection{Bomberman as a reinforcement learning problem}
+\contributionauthor{Mark Salzmann}
+At each time step, the agent observes the game, chooses an action, and receives
+feedback through game events. Its action set is
+\[
+\mathcal{A}=\{\texttt{UP}, \texttt{RIGHT}, \texttt{DOWN}, \texttt{LEFT}, \texttt{WAIT},\texttt{BOMB}\}.
+\]
+An episode corresponds to a round of play from the agent's perspective and
+ends when it dies or the round terminates. The configured board has
+$17\times17$ tiles, with a maximum of four agents and 400 steps per round.
+The aim of the game is to collect coins and eliminate opponents. Coins yield points immediately, whereas placing a bomb can produce a benefit
+only after its timer expires. The agent must therefore consider future
+consequences rather than only the next reward.
+
+A Markov decision process provides the value-learning framework, with states,
+actions, transitions, rewards, and discount factor $\gamma$. The complete
+environment state includes hidden coin locations and opponent memory, while
+the callback exposes only an observation. Opponents' decisions also affect
+transitions. We use engineered observations and limited action history as
+an approximate state representation, rather than claiming that the network
+input is Markov sufficient.
+To make optimal decisions, the next action should be chosen based on the expected future rewards, considering both immediate and delayed consequences, captured by the action-value function defined as
+\begin{equation}
+Q^\pi(s,a)=\mathbb{E}_{\pi}\!\left[
+\sum_{k=0}^{T-t-1}\gamma^k r_{t+k+1}
+\,\middle|\,s_t=s,a_t=a\right].
+\end{equation}
+Here, $r_{t+1}$ is the learning reward, $T$ is the episode's terminal time,
+and $\pi$ is the policy. A larger discount factor gives delayed outcomes
+greater weight. For example, a useful bomb placement may deserve a high value
+even if the agent must first move away and wait for the explosion.
+
+\subsection{From Q-learning to deep Q-learning}
+\contributionauthor{Mark Salzmann}
+A deep Q-network (DQN) uses a neural network to approximate the action-value function, allowing it to generalize across similar states and handle large state spaces. 
+For a given input state $s$ the network outputs a vector of action values $Q(s,a,\theta)$ for all possible actions $a \in \mathcal{A}$.
+
+An illustrative squared-TD semi-gradient update changes parameters $\theta$ as follows. The implemented agents instead use Smooth L1 loss and AdamW, as described in their optimization sections
+
+\begin{equation}
+    \theta_{t+1} = \theta_t + \alpha\left(Y^Q_t - Q(S_t, A_t, \theta_t)\right) \nabla_\theta Q(S_t, A_t, \theta_t), 
+\end{equation}
+where $\alpha$ is the learning rate. The target is defined below, with $d_{t+1}=1$ on agent death or round termination and zero otherwise; terminal transitions do not bootstrap
+\begin{equation}
+Y^Q_t = r_{t+1} + \gamma(1-d_{t+1}) \max_{a} Q(S_{t+1}, a, \theta_t).
+\end{equation}
+
+Previous steps get stored in the \emph{experience replay} buffer, which allows the network to sample minibatches of past transitions for training, reducing the correlation between consecutive updates.
+Furthermore the target network with parameters $\theta^-$ is used to compute the target values, and it is updated every $\tau$ steps from the online network's parameters such that  $\theta^- = \theta_t$.
+The target used in the update then becomes
+\begin{equation}
+Y^Q_t = r_{t+1} + \gamma(1-d_{t+1}) \max_{a} Q(S_{t+1}, a, \theta^-),
+\label{eq:dqn}
+\end{equation}
+where $\theta^-$ are the parameters of the target network.
+
+\subsection{Double DQN: separating selection and evaluation}
+\contributionauthor{Mark Salzmann}
+The maximum in Equation~\eqref{eq:dqn} selects and evaluates an action using the same estimates. 
+The issue with this method is that is prone to overstimation of action values, leading to bias in the learned Q-values.
+Van Hasselt et al.\ show that this overestimation also occurs with deep networks and propose Double DQN to
+reduce it \citep{vanhasselt2015double}.
+
+They therefore propose the Double DQN approach, which uses the online network with parameters $\theta$ to select the next action and the target network with parameters $\theta '$ to evaluate that action.
+In both implementations, gradient updates change the online network and a hard copy updates the target network. RUEHL measures its copy interval in gradient updates, whereas the final agent measures it in regular training-transition steps; the two networks do not randomly exchange roles.
+The double DQN target is defined as
+\begin{equation}
+Y_t^{\mathrm{DoubleDQN}}=r_{t+1}+\gamma(1-d_{t+1})\;Q\Big(s_{t+1},\arg\max_{a\in\mathcal{A}_m(s_{t+1})}Q(s_{t+1},a, \theta_t);\theta'\Big),
+\label{eq:double dqn}
+\end{equation}
+Here, $\mathcal{A}_m(s)$ is the nonempty set admitted by the action mask. Action selection in the $\arg\max$ uses the online parameters $\theta_t$, while the target parameters $\theta'$ evaluate the selected action. This separation is intended to reduce overestimation; it does not guarantee an unbiased estimate.
+
+In Bomberman, a relevant motivation is to avoid overvaluing risky actions whose apparent payoff is based on inaccurate predictions.
+This motivates Double DQN in our setting, although improved safety or competitive performance would require a controlled comparison against an otherwise identical learning algorithm.
+
+
+\FloatBarrier
+\input{sections/planning}
+\section{Methods}\label{sec:methods}
+\contributionauthors{Mark Salzmann, Eric Flämig, Jesper Eggers}
+\subsection{RUEHL agent}\label{sec:ruehl-methods}
+\contributionauthor{Mark Salzmann}
+
+
+\subsubsection{Input representation and feature engineering}
+\contributionauthor{Mark Salzmann}
+The function \texttt{state\_to\_features} converts the observation into seven
+spatial maps and ten scalar values. The board input has shape
+$7\times17\times17$ and uses game information directly rather than rendered
+screen pixels. Table~\ref{tab:2d-features} summarizes its channels.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lY@{}}
+\toprule
+Channel & Encoding \\
+\midrule
+Walls & Binary map of indestructible walls. \\
+Crates & Binary map of destructible crates. \\
+Coins & Binary map of currently visible coins. \\
+Own position & Binary map of the agent's tile. \\
+Opponents & Binary map marking each opponent's tile. \\
+Bomb timers & At each bomb tile, $(t_b+1)/5$ for its remaining timer $t_b$; zero elsewhere. \\
+Combined danger & Maximum of the active-explosion indicator and $(5-t_b)/5$ across bombs whose blast includes a tile. \\
+\bottomrule
+\end{tabularx}
+\caption{Spatial features implemented in \texttt{callbacks.py}.}
+\label{tab:2d-features}
+\end{table}
+
+The combined danger map already merges active explosions with prospective bomb threats. The denominators above use the configured bomb timer of four; this channel encodes urgency rather than raw explosion duration.
+
+The ten scalar inputs comprise four state quantities and a six-entry previous-action encoding. They contain the agent's bomb availability, currently visible coin count, remaining opponent count, and current step, with the normalization shown in Table~\ref{tab:scalar-features}. The round number is not an input.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lY@{}}
+\toprule
+Channel & Encoding \\
+\midrule
+Bomb availability & Binary value indicating if the agent can place a bomb. \\
+Visible coins & Number of currently visible coins divided by the configured total coin count. \\
+Remaining opponents & Number of opponents divided by $\texttt{MAX\_AGENTS}-1=3$. \\
+Current step & Current step divided by $\texttt{MAX\_STEPS}=400$. \\
+Previous action & Six-entry one-hot encoding of the previous action; initialized to \texttt{WAIT}. \\
+\bottomrule
+\end{tabularx}
+\caption{Scalar features implemented in \texttt{callbacks.py}.}
+\label{tab:scalar-features}
+\end{table}
+
+These scalars summarize the current observation and previous action. Own and opponent positions remain spatial features; hidden coins are not counted until they become visible.
+
+\subsubsection{Neural network architecture}
+\contributionauthor{Mark Salzmann}
+Given the combination of spatial and scalar features, it is reasonable to use a network architecture that processes these two types of inputs separately before combining them for decision making.
+The spatial branch contains four convolutional layers with ReLU activations.
+Dilated convolutions expand the area visible to a filter without increasing its number of weights, while the third convolution reduces the spatial resolution. 
+Table~\ref{tab:network} gives the dimensions derived from
+\texttt{Networks.py} with the batch dimension is omitted.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lYl@{}}
+\toprule
+Component & Operation & Output shape \\
+\midrule
+Board input & Seven spatial channels & $7\times17\times17$ \\
+Convolution 1 & $3\times3$, 32 filters, stride 1, padding 1 & $32\times17\times17$ \\
+Convolution 2 & $3\times3$, 32 filters, dilation 2, padding 2 & $32\times17\times17$ \\
+Convolution 3 & $3\times3$, 32 filters, stride 2, padding 1 & $32\times9\times9$ \\
+Convolution 4 & $3\times3$, 32 filters, dilation 2, padding 2 & $32\times9\times9$ \\
+Flatten & Flatten the board features & $2592$ \\
+Scalar branch & Linear $10\to32$, ReLU & $32$ \\
+Concatenation & Join spatial and scalar features & $2624$ \\
+Shared layers & Linear $2624\to128\to128$, ReLU after each & $128$ \\
+Value head & Linear $128\to1$ & $1$ \\
+Advantage head & Linear $128\to6$ & $6$ \\
+\bottomrule
+\end{tabularx}
+\caption{Architecture of the RUEHL network for the configured board size.}
+\label{tab:network}
+\end{table}
+Each output of the last convolution has a theoretical receptive field of $17\times17$ input tiles, including padding near the boundary. The flattened features subsequently connect to shared fully connected layers.
+
+Complementing the double DQN strategy, one can employ a dueling network architecture to separately estimate state values and action advantages, which can lead to more stable learning and improved policy evaluation.
+In the dueling DQN architecture, the action-value function is not represented directly by a single network output. Instead, the network decomposes the estimate of \(Q(s,a)\) into two components: a state-value function \(V_\theta(s)\) and an action-dependent advantage function \(A_\theta(s,a)\) \citep{wang2016dueling}. The state-value function represents the overall quality of being in state \(s\), independently of which action is selected, whereas the advantage function describes the relative benefit of choosing a particular action \(a\) in that state.
+
+A naive decomposition of the form
+
+$$
+Q_\theta(s,a)=V_\theta(s)+A_\theta(s,a)
+$$
+
+is not identifiable. In particular, an arbitrary constant \(c\) can be added to the value function and subtracted from all advantage values without changing \(Q_\theta\):
+
+$$
+V_\theta(s)+c
++
+\left(A_\theta(s,a)-c\right)
+=
+V_\theta(s)+A_\theta(s,a).
+$$
+
+Consequently, the network would have no unique way of determining which part of the predicted action value should be represented by \(V_\theta\) and which part should be represented by \(A_\theta\).
+
+To remove this ambiguity, the dueling architecture combines the two streams by subtracting the mean advantage over all six action outputs, before masking,
+\begin{equation}
+Q_\theta(s,a)=V_\theta(s)+A_\theta(s,a)
+-\frac{1}{|\mathcal{A}|}\sum_{b\in\mathcal{A}}A_\theta(s,b).
+\label{eq:dueling}
+\end{equation}
+This centers the effective advantage values around zero. 
+An important consequence of this parameterization is obtained by averaging \(Q_\theta(s,a)\) over all actions:
+
+$$
+\frac{1}{|\mathcal A|}
+\sum_{a\in\mathcal A}Q_\theta(s,a)
+=
+V_\theta(s).
+$$
+
+Thus, under this aggregation rule, the value stream represents the mean predicted action value in a state, while the centered advantage stream determines how the individual action values differ from this common baseline. In particular, because both \(V_\theta(s)\) and \(\bar A_\theta(s)\) are independent of the selected action,
+
+$$
+\arg\max_{a} Q_\theta(s,a)
+=
+\arg\max_{a} A_\theta(s,a).
+$$
+
+Hence, the advantage stream determines the relative ranking of actions, whereas the value stream controls the overall level of their Q-values.
+
+The motivation for this decomposition is that in many states the precise choice of action has only a small effect on the expected return. A conventional DQN must nevertheless estimate a separate \(Q(s,a)\) for every action. The dueling architecture allows the network to learn features that characterize whether a state is generally favorable or unfavorable through \(V_\theta(s)\), while using the advantage stream only to represent differences between actions. This can make value estimation more efficient in states where several actions have similar consequences \citep{wang2016dueling}.
+
+The two quantities are not trained using separate value and advantage targets. Instead, they are combined according to Eq.~\eqref{eq:dueling} to obtain \(Q_\theta(s,a)\), and the usual temporal-difference loss is applied to this resulting Q-value. Gradients then propagate through the aggregation operation into both the value and advantage streams. The decomposition is therefore an architectural parameterization of the Q-function rather than the introduction of two independently supervised learning objectives.
+
+
+\FloatBarrier
+
+\subsubsection{Action masking and hand-designed guidance}
+\contributionauthor{Mark Salzmann}
+The mask is an important part of an effective policy. It first rejects
+movement into walls, crates, bombs, or opponents. It then filters movement
+and waiting on active explosions or blast tiles of bombs whose timers are
+at most one. Bomb placement is allowed only when a bomb is available, its
+blast could hit a crate or opponent, and a static breadth-first search finds
+a tile outside its blast within the configured bomb timer.
+
+If no action survives the danger filter, the code falls back to the earlier
+legal-action mask. If that is also empty, the model chooses \texttt{WAIT}.
+This is therefore a heuristic filter, not a guarantee of survival. 
+Its static escape search does not predict moving opponents or jointly simulate other bombs over time.
+
+This guidance reduces the exploration burden, but it also contributes to
+the observed behavior independently of learned Q-values. Results should
+therefore describe the complete network-plus-mask policy. The Double DQN
+update in \texttt{train.py} also applies the next-state
+action mask before the online network selects its maximizing action. The
+target network then evaluates that selected action.
+
+\subsubsection{Reward shaping}
+\contributionauthor{Mark Salzmann}
+\label{sec:reward-design}
+The main goal of the agent is to maximize game score at the end of the game, by collecting coins, eliminating opponents, given by
+\begin{equation}
+S=N_{\mathrm{coins}}+5N_{\mathrm{opponents\ killed}}.
+\end{equation}
+However, starting from these sparse and delayed objectives alone makes it difficult for the agent to learn effective strategies.
+Reward shaping addresses this problem, by giving intermediate rewards and punishments that guide the agent's behavior before the final game outcome is known.
+For the \texttt{ruehl\_based\_agent}, equivalent movements receive the same reward irrespective of absolute direction. This encourages consistency with board symmetries, but neither these reward magnitudes nor standard convolutions guarantee rotation or reflection equivariance.
+Additional RUEHL shaping is derived from observed transitions and events, including waiting, danger, and movement reversal. These terms guide learning without establishing policy invariance.
+Furthermore, one can differentiate between main rewards, connecting to significant game events, and shaping rewards, which serve as fine tuning of the agent's behavior. The shaping rewards are an order of magnitude smaller than the main rewards.
+
+\paragraph{Main rewards}
+The main contribution, stored under \texttt{major},
+assigns values to selected game events.
+Collecting a coin provides a baseline reward, typically 1 point, in accordance with the actual game score.
+Other rewards will be scaled relative to this baseline.
+A separate Self-destruction penalty is useful in competitive play. 
+This expresses the trade-off between gaining points and retaining the opportunity to act. 
+Penalizing only death would encourage excessive caution, meanwhile rewarding only attacks would provide insufficient feedback about their danger. 
+Their combination is intended to encourage productive risks with an escape plan.
+
+\paragraph{Shaping penalties}
+The separate shaping terms discourage waiting, entering an active explosion,
+and, in the competitive profile, immediately reversing movement direction.
+Their purpose is to discourage inactivity and repeated back-and-forth motion
+without making these actions impossible. Waiting for an explosion to clear
+or reversing direction to escape can be necessary, so these penalties should
+remain small relative to important outcomes.
+
+\subsubsection{Task-specific reward profiles}
+\contributionauthor{Mark Salzmann}
+We identified three substantially different challenges, for which we designed corresponding reward profiles: \texttt{coin}, \texttt{loot\_exploration}, and \texttt{killer}. 
+Determining the appropriate distribution of rewards was a challenging task that required long trial and error processes.
+The current values are summarized in Table~\ref{tab:reward-profiles}.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}Yrrr@{}}
+\toprule
+Event or parameter & \texttt{coin} & \texttt{loot\_exploration} & \texttt{killer} \\
+\midrule
+Coin collected & $1.0$ & $1.0$ & $1.0$ \\
+Coin revealed & $0.1$ & $0.5$ & $0.5$ \\
+Crate destroyed & $0$ & $0.35$ & $0.15$ \\
+Bomb placed to hit a crate & $0$ & $0.05$ & $0.02$ \\
+Bomb placed to threaten an opponent & $0$ & $0$ & $0.75$ \\
+Opponent killed & $6.5$ & $6.5$ & $6.0$ \\
+Killed by another agent & $-1.0$ & $-1.0$ & $-2.0$ \\
+Self-destruction & $-2.0$ & $-2.0$ & $-6.0$ \\
+Bomb exploded & $0$ & $0$ & $0.15$ \\
+Round survived & $0$ & $0$ & $0.75$ \\
+\midrule
+Waiting (shaping) & $-0.08$ & $-0.01$ & $-0.05$ \\
+Danger (shaping) & $-0.02$ & $-0.04$ & $-0.10$ \\
+Reversing direction (shaping) & $0$ & $0$ & $-0.03$ \\
+Shaping limit $c$ & $0.05$ & $0.05$ & $0.15$ \\
+Step cost $\lambda$ & $0.008$ & $0$ & $0.002$ \\
+\bottomrule
+\end{tabularx}
+\caption{Reward profiles in \texttt{train.py}. Event values are summed per
+transition; only the combined shaping contribution is clipped. A zero denotes
+an event with no assigned reward in that profile.}
+\label{tab:reward-profiles}
+\end{table}
+
+\paragraph{Coin collection.}
+The \texttt{coin} profile rewards collection and discourages waiting through
+both a shaping penalty and a small step cost. It gives no direct incentive
+for crate destruction or bomb placement, focusing the initial task on
+navigation. Opponent-kill rewards are inherited from the shared reward table
+but have no effect in a scenario without opponents.
+
+\paragraph{Crate exploration.}
+The \texttt{loot\_exploration} profile rewards destroying crates, revealing
+coins, and placing bombs whose blast reaches a crate. These intermediate
+rewards provide feedback before the agent eventually collects a coin.
+Removing the step cost and reducing the waiting penalty allows more time
+for bomb placement and escape sequences, while the self-destruction penalty
+retains an incentive to survive.
+
+\paragraph{Competitive play.}
+The \texttt{killer} profile emphasizes successful attacks and survival. A
+bomb that currently threatens an opponent earns an immediate reward of
+$0.75$, while a confirmed kill earns $6.0$. Self-destruction costs $6.0$,
+substantially more than death caused by another agent. Smaller crate rewards
+preserve an incentive to open routes, and surviving the round earns $0.75$.
+The bomb-placement event checks the current blast geometry, not whether the
+opponent will actually be hit. If both opponents and crates are in range,
+only the opponent-targeting placement event is added.
+
+\subsection{Final agent}\label{sec:final-methods}
+\contributionauthor{Eric Flämig}
+
+It should be noted that the final agent is only final by name and was not the submitted agent for the competition.
+
+The final agent is based on the same Double DQN learning framework and broadly similar staged objectives as the Ruehl based agent, but with some modifications to the input representation and reward shaping. The intention behind the final agent was to explore the impact of a bigger Network architecture, and to investigate the effect of a different reward shaping strategie and the use of a more guided action mask on the agent's performance.
+
+Compared to the Ruehl based agent, the final agent uses a larger network with more convolutional layers and filters, allowing it to capture more complex spatial relationships in the game environment. Additionally, the final agent incorporates a more sophisticated reward shaping strategy that takes into account not only the immediate rewards but also the long-term consequences of actions, encouraging the agent to develop more strategic behaviors. It also incorporates a more guided action mask that restricts the agent's actions based on the current game state, helping it to avoid dangerous situations and make more informed decisions.
+\subsubsection{The Features}
+\contributionauthor{Eric Flämig}
+The features used for this Network are one of the main differences between the Ruehl based agent and the final agent.
+
+The spatial input consists of fourteen \(17\times17\) feature maps containing information such as walls, crates, coins, agent positions, and bomb-related danger. Each one of these maps is designed to capture only one spatial aspect of the game state, which resulted in 14 different channels of information which are summarized in Table~\ref{tab:final-agent-spatial-features}.
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}r>{\raggedright\arraybackslash}p{4.2cm}Y@{}}
+\toprule
+Channel & Feature & Encoding \\
+\midrule
+0 & Walls & Binary map of indestructible walls. \\
+1 & Crates & Binary map of destructible crates. \\
+2 & Coins & Binary map of visible coins. \\
+3 & Own position & One-hot encoding of the agent's current tile. \\
+4 & Useful bomb positions & Binary map of free tiles where placing a bomb could hit a crate. \\
+5 & Bomb timers & Remaining timer divided by 4 at each bomb's position; zero elsewhere. \\
+6 & Bomb danger & Binary map of tiles within the blast area of any existing bomb, regardless of its timer. \\
+7 & Active explosions & Binary map indicating where \texttt{explosion\_map}$>0$. \\
+8 & Free terrain & Binary map indicating where \texttt{field}$=0$; tiles may still contain bombs or agents. \\
+9 & Opponent positions & Binary map of opponents' current tiles. \\
+10 & Explosion urgency & $1-t_{\min}/4$ at threatened tiles, where $t_{\min}$ is the smallest timer among bombs whose blasts cover that tile; zero elsewhere. \\
+11 & Safe neighboring tiles & Binary map of adjacent tiles for which the survival search finds a surviving continuation after moving there. \\
+12 & Own hypothetical blast & Binary map of tiles affected by a hypothetical bomb at the agent's current position. \\
+13 & Opponents' hypothetical blasts & Binary map of tiles affected by hypothetical bombs at opponents' current positions. \\
+\bottomrule
+\end{tabularx}
+\caption{The final agent's fourteen spatial input channels.
+Each channel has dimensions $17\times17$.
+Channel indices follow the implementation in \texttt{callbacks.py}.}
+\label{tab:final-agent-spatial-features}
+\end{table}
+The twenty-two scalar features in Table~\ref{tab:final-agent-scalar-features} supply directional, temporal, and opponent-related guidance to the network. They differ substantially from RUEHL's compact scalar input. Their sample-efficiency and generalization effects are design hypotheses, not isolated empirical findings.
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}r>{\raggedright\arraybackslash}p{4.2cm}Y@{}}
+\toprule
+Index & Feature & Encoding \\
+\midrule
+0 & Coin direction, $x$ & Suggested next step's $x$-offset toward a coin, divided by 17. \\
+1 & Coin direction, $y$ & Suggested next step's $y$-offset toward a coin, divided by 17. \\
+2 & Crate-target direction, $x$ & Suggested next step's $x$-offset toward a useful bomb position, divided by 17. \\
+3 & Crate-target direction, $y$ & Suggested next step's $y$-offset toward a useful bomb position, divided by 17. \\
+4 & Crate within bomb range & Binary indicator that a bomb at the current position could hit a crate. \\
+5 & Bomb availability & Integer value of \texttt{bombs\_left}. \\
+6 & Current danger & Binary indicator that the current tile lies in an existing bomb's blast area or an active explosion. \\
+7 & Safe movement available & Binary indicator that at least one movement action has a surviving continuation. \\
+8 & Previous position, $x$ & $(x_{\mathrm{previous}}-x)/17$. \\
+9 & Previous position, $y$ & $(y_{\mathrm{previous}}-y)/17$. \\
+10 & Two positions back, $x$ & $(x_{\mathrm{two\ back}}-x)/17$. \\
+11 & Two positions back, $y$ & $(y_{\mathrm{two\ back}}-y)/17$. \\
+12 & Round progress & Current step divided by 400. \\
+13 & Closest opponent distance & Minimum Manhattan distance to an opponent, divided by 17; set to 2 if no opponents remain. \\
+14 & Opponent within bomb range & Binary indicator that a bomb at the current position could hit an opponent. \\
+15 & Survival after bomb placement & Binary indicator that the search finds a surviving path after placing a bomb and remaining on the current tile for that action. \\
+16 & Potential attacking opportunity & Binary conjunction of opponent within bomb range and survival after bomb placement. \\
+17 & Predicted trapped opponent & Binary indicator that an opponent lies in the proposed bomb's blast area and the search finds no escape for that opponent. \\
+18 & Opponent direction, $x$ & Suggested next step's $x$-offset toward an opponent, divided by 17. \\
+19 & Opponent direction, $y$ & Suggested next step's $y$-offset toward an opponent, divided by 17. \\
+20 & Remaining opponents & Number of opponents divided by 3. \\
+21 & Current score & Raw game score without normalization. \\
+\bottomrule
+\end{tabularx}
+\caption{The final agent's twenty-two scalar input features.
+Here, $(x,y)$ is the agent's current position.
+Direction features describe the next step suggested by the path search.
+Historical positions refer to recorded position changes, with consecutive
+repetitions omitted; missing history entries are encoded as zero.
+Indices follow the implementation in \texttt{callbacks.py}.}
+\label{tab:final-agent-scalar-features}
+\end{table}
+
+\subsubsection{Neural Network Architecture}
+\contributionauthor{Eric Flämig}
+
+The final agent's network architecture is similar to the Ruehl based agent, but with some modifications to the convolutional layers and the fully connected layers.
+
+It is based on the same two headed logic, where a CNN evaluates the spatial features and a fully connected network evaluates the scalar features. The outputs of both networks are then concatenated and passed through a series of fully connected layers to produce the final Q-values for each action. In theory a simple CNN should be sufficient for this task, but we decided to add a fully connected network to potentially speed up the training process.
+
+During development, earlier deeper versions were reported to train slowly and make weak use of scalar information. These observations motivated preserving a scalar embedding and adding residual blocks and smooth activations. They were not measured in a common-budget ablation and do not establish the contribution of each modification. The current \texttt{HybridDQN} is summarized below.
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lYl@{}}
+\toprule
+Component & Operation & Output shape \\
+\midrule
+Board input & Fourteen spatial channels & $14\times17\times17$ \\
+Convolution 1 & $3\times3$, 32 filters, stride 1; GN, SiLU & $32\times17\times17$ \\
+Residual block 1 & Two $3\times3$ convolutions, 32 filters; skip connection & $32\times17\times17$ \\
+Convolution 2 & $3\times3$, 64 filters, stride 2; GN, SiLU & $64\times9\times9$ \\
+Residual block 2 & Two $3\times3$ convolutions, 64 filters; skip connection & $64\times9\times9$ \\
+Convolution 3 & $3\times3$, 96 filters, stride 2; GN, SiLU & $96\times5\times5$ \\
+Residual block 3 & Two $3\times3$ convolutions, 96 filters; skip connection & $96\times5\times5$ \\
+Flatten & Flatten the spatial features & $2400$ \\
+\midrule
+Scalar input & Twenty-two engineered features & $22$ \\
+Scalar branch & Linear $22\to64\to64$, LN and SiLU after each layer & $64$ \\
+\midrule
+Concatenation & Join spatial and scalar features & $2464$ \\
+Shared layers & Linear $2464\to512\to256$, LN and SiLU after each layer & $256$ \\
+Value head & Linear $256\to128\to1$, SiLU after the hidden layer & $1$ \\
+Advantage head & Linear $256\to128\to6$, SiLU after the hidden layer & $6$ \\
+Dueling output & $Q(s,a)=V(s)+A(s,a)-\frac{1}{6}\sum_{b=1}^{6}A(s,b)$ & $6$ \\
+\bottomrule
+\end{tabularx}
+\caption{Architecture of the final agent's \texttt{HybridDQN}.
+The batch dimension is omitted.
+GN denotes group normalization with eight groups; LN denotes layer normalization.
+All convolutions use padding 1.
+Each residual block uses stride 1 and applies
+convolution--GN--SiLU--convolution--GN, followed by addition of the
+block input and a final SiLU activation.}
+\label{tab:final-agent-network}
+\end{table}
+The final agent’s HybridDQN combines a convolutional neural network with a fully connected network to process two complementary representations of the game state. The convolutional branch extracts spatial patterns from the board, while the fully connected branch processes engineered features that describe relevant game situations explicitly. Their outputs are combined and passed to a dueling architecture, which estimates a shared state value and the relative advantages of individual actions.
+
+The first convolution transforms the 14 spatial feature maps into 32 feature maps while preserving their spatial dimensions. Two subsequent convolutional stages increase the number of channels to 64 and 96, respectively. These stages use a stride of two, reducing the spatial resolution first to \(9\times9\) and then to \(5\times5\). This lets the network combine information across increasingly large regions of the board while limiting the number of features passed to the fully connected layers. Each of these convolutions is followed by group normalization with eight groups and a SiLU activation. The SiLU function was chosen, because with ReLU we previously observed a significant number of dead neurons in the fully connected layers, which we hoped to prevent with the SiLU activation.
+
+Each convolutional stage also contains a residual block. A residual block processes its input through two additional convolutions and then adds the original input to their output. For an input tensor \(x\), the block computes
+\begin{equation}
+    ResBlock (x) = GN_2(Conv_2(SiLU(GN_1(Conv_1(x))))),
+\end{equation}
+followed by
+\begin{align}
+    y = SiLU(x + ResBlock(x)).
+\end{align}
+
+Both convolutions use \(3\times3\) kernels, stride one, and padding one. They preserve the number of channels and the spatial dimensions, so the input \(x\) and the transformed features \(F(x)\) can be added element by element. Consequently, the residual blocks preserve the shapes \(32\times17\times17\), \(64\times9\times9\), and \(96\times5\times5\), respectively. The resolution changes occur in the strided convolutions between the blocks.
+
+The addition of \(x\) to the output of the residual block allows the convolutional path to learn corrections or additions to an existing representation. For example, a block can refine features describing nearby crates by incorporating surrounding escape routes. During backpropagation, the addition also provides a direct path for gradients alongside the path through the convolutional layers, making it easier to train a deeper spatial encoder. This was implemented to allow the network to learn from a pretrained starting point, and to improve the learning of more complex spatial relationships.
+
+The fully connected branch takes the 22 engineered features as input and processes them through two linear layers with 64 hidden units each. Each layer is followed by layer normalization and a SiLU activation. The output of this branch is a 64-dimensional feature vector that captures relevant scalar information about the game state.
+
+The final agent uses the dueling decomposition described for the
+Ruehl based agent, combining its value and advantage outputs
+according to Equation~\eqref{eq:dueling}.
+
+In the final agent, both heads receive the shared 256-dimensional
+representation. Each head contains a separate fully connected
+hidden layer with 128 units and a SiLU activation. A final linear
+layer produces one value estimate in the value head and six
+action-specific outputs in the advantage head.
+
+Compared with the direct output layers of the Ruehl network,
+these additional hidden layers allow each head to apply its own
+nonlinear transformation to the shared representation before
+producing its output. The aggregation rule remains unchanged.
+
+The architecture increases representational capacity and preserves a separate scalar embedding. Whether its residual blocks, normalization, or activation choices improve learning requires controlled comparisons. 
+
+\subsubsection{The Action Mask}
+\contributionauthor{Eric Flämig}
+One of the main differences between the Ruehl based agent and the final agent is the use of a more guided action selection through the action mask. The intend was to reduce the amount of possible scenarios to only the ones that were legal moves and that did not lead to an immediate suicide of the agent. The reasoning behind that restrictive approach, was to reduce the training time.
+
+The final agent uses a hand-designed action mask to restrict action
+selection according to physical feasibility, predicted survival, and
+the usefulness of bomb placement. For each state, the mask assigns
+a Boolean value to each of the six actions.
+
+The survival check performs a breadth-first search, which was implemented from the rule based agent, over positions and
+future time steps, using a horizon of six steps. The first action is
+fixed to the candidate being evaluated; subsequent steps may contain
+any of the four movement actions or waiting. A candidate passes the
+check if at least one continuation survives the entire search horizon.
+The search accounts for walls, crates, bomb occupancy, bomb timers,
+and active explosions. Consequently, it can reject a move that is
+safe immediately but leads to an unavoidable explosion a few steps
+later.
+
+For bomb placement, the search inserts a hypothetical bomb at the
+agent's current position. The agent remains on that tile during the
+placement action, and the search then checks whether a surviving
+continuation exists. Bomb placement additionally requires an available
+bomb and a blast area that could reach at least one crate or opponent.
+Table~\ref{tab:final-agent-action-mask} summarizes the rules.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lY@{}}
+\toprule
+Action or stage & Rule \\
+\midrule
+Movement &
+Allow the action if the destination is traversable and the survival
+search finds a continuation lasting the full six-step horizon. \\
+
+\texttt{WAIT} &
+Allow waiting if remaining on the current tile for the first step
+permits a surviving continuation. \\
+
+\texttt{BOMB} &
+Allow placement if a bomb is available, its blast could reach a crate
+or opponent, and the survival search succeeds with the additional
+bomb included. \\
+
+\midrule
+First fallback &
+If the preceding rules reject every action, allow movement to
+adjacent tiles inside the board that contain no wall, crate, bomb,
+or opponent. Explosion danger is disregarded at this stage;
+waiting and bomb placement remain excluded. \\
+
+Final fallback &
+If no movement action passes the first fallback, allow
+\texttt{WAIT}, even if survival cannot be established. \\
+\bottomrule
+\end{tabularx}
+\caption{Action-mask rules of the final agent.
+The fallback stages are applied only when the preceding stage
+leaves no permitted action.}
+\label{tab:final-agent-action-mask}
+\end{table}
+
+The mask is applied during both exploration and exploitation.
+Exploration samples uniformly from the permitted actions.
+For greedy selection, excluded actions receive a temporary value
+of $-\infty$:
+\begin{equation}
+\widetilde{Q}(s,a)=
+\begin{cases}
+Q(s,a), & \text{if the mask permits } a,\\
+-\infty, & \text{otherwise}.
+\end{cases}
+\end{equation}
+The agent then selects the action maximizing
+$\widetilde{Q}(s,a)$. During Double DQN training, the next-state
+mask also restricts the online network's action selection when
+constructing the bootstrap target; the target network evaluates
+the selected action.
+
+The survival prediction uses a simplified model: terrain remains
+fixed during the search, opponents' current positions block only
+the first step, and future opponent movements and new bomb
+placements are not predicted. Together with the fallback rules,
+these assumptions mean that the mask cannot guarantee survival.
+It provides explicit guidance that contributes to the agent's
+behavior alongside the learned Q-values, while restricting
+exploration to actions admitted by its rules.
+
+\subsubsection{The Reward Shaping}
+\contributionauthor{Eric Flämig}
+We aimed to align final-agent shaping with represented observations. The implementation also uses transition events and limited tracked history, including the most recent own bomb; reward observability is a design preference rather than a requirement that every reward condition occupy its own input feature.
+
+The final agent combines rewards for game outcomes with smaller
+rewards for intermediate behavior. These intermediate signals provide
+feedback before an action sequence produces a measurable outcome.
+For example, destroying a crate and collecting the coin underneath
+requires the agent to approach a suitable position, place a bomb,
+escape its blast, and return after the explosion. Reward shaping
+provides feedback at several points in this sequence.
+
+The learning reward is constructed by summing the contributions of
+the events associated with a transition. Multiple contributions can
+therefore occur simultaneously: collecting a coin can coincide with
+movement-related rewards and the step penalty. Events without an
+assigned reward contribute zero. The current reward configuration is
+summarized in Table~\ref{tab:final-agent-rewards}.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}Yr@{}}
+\toprule
+Event or condition & Reward \\
+\midrule
+\multicolumn{2}{@{}l}{\textit{Game outcomes}} \\
+Opponent eliminated & $+25.00$ \\
+Coin collected & $+7.00$ \\
+Round survived & $+1.00$ \\
+Crate destroyed & $+0.10$ \\
+Coin revealed & $+0.05$ \\
+Suicide & $-20.00$ \\
+Got killed by an opponent & $-15.00$ \\
+\midrule
+\multicolumn{2}{@{}l}{\textit{Bomb placement and escape}} \\
+Bomb predicted to trap an opponent & $+0.75$ \\
+Bomb threatening an opponent without a predicted trap & $+0.30$ \\
+Bomb targeting a crate without threatening an opponent & $+0.20$ \\
+Bomb placement failing the preceding checks & $-0.50$ \\
+Leaving the tracked own bomb's blast area & $+0.30$ \\
+Remaining in that blast area without a predicted survival path & $-1.00$ \\
+\midrule
+\multicolumn{2}{@{}l}{\textit{Movement guidance}} \\
+Moving closer to a coin & $+0.05$ \\
+Moving farther from a coin & $-0.05$ \\
+Moving closer to an opponent & $+0.05$ \\
+Moving farther from an opponent & $-0.05$ \\
+Moving closer to a useful crate-bombing position & $+0.03$ \\
+Moving farther from a useful crate-bombing position & $-0.03$ \\
+\midrule
+\multicolumn{2}{@{}l}{\textit{Behavioral penalties}} \\
+Invalid action & $-1.00$ \\
+Waiting & $-0.05$ \\
+Returning to the position recorded two steps earlier & $-0.50$ \\
+Step cost on regular training transitions & $-0.01$ \\
+\bottomrule
+\end{tabularx}
+\caption{Reward configuration of the final agent.
+Positive bomb-placement rewards require a predicted survival path.
+Bomb-placement categories are mutually exclusive, and the
+self-destruction penalty replaces the ordinary death penalty.}
+\label{tab:final-agent-rewards}
+\end{table}
+
+Collecting coins and eliminating opponents receive substantially
+larger rewards than individual shaping events. This gives completed
+objectives greater weight than intermediate progress. Crate
+destruction and coin revelation receive smaller rewards because they
+create opportunities for later collection. These values define a
+learning objective with its own relative priorities: an opponent
+elimination is worth approximately $25/7 \approx 3.57$ collected coins.
+
+Death receives a substantial negative contribution. The implementation
+distinguishes self-destruction, penalized by $-20$, from other deaths,
+penalized by $-15$. Since self-destruction also generates the general
+death event, the reward function explicitly applies only the
+self-destruction penalty in this case. This prevents an unintended
+combined penalty of $-35$. Other rewards generated during the same
+transition still contribute to the total.
+
+Bomb-placement shaping distinguishes between predicted usefulness
+and confirmed success. A placement receives $+0.75$ if the agent has
+a predicted escape route and an opponent within the blast area is
+predicted to have no escape. If an opponent is threatened but no trap
+is predicted, the reward is $+0.30$. A placement targeting a crate
+receives $+0.20$ when an escape is predicted and no opponent is
+threatened. These conditions are evaluated in priority order, so a
+single placement receives only one placement classification.
+Placements failing these checks receive $-0.50$. The larger reward
+for an actual elimination is awarded separately when the outcome
+occurs.
+
+The agent also tracks its most recent bomb placement. Leaving that
+bomb's blast area produces a reward of $+0.30$. Remaining inside the
+area produces a penalty of $-1.00$ only when the survival search finds
+no surviving continuation. This condition allows temporary movement
+within the blast area while an escape remains possible.
+
+Movement shaping uses changes in Euclidean distance to coins,
+opponents, and positions from which a bomb could destroy a crate.
+Decreasing the distance produces a small positive reward, while
+increasing it produces a negative contribution. The crate-related
+target is therefore a useful placement position rather than the
+crate's occupied tile. These signals provide frequent directional
+feedback, although Euclidean distance does not account for obstacles
+or the length of a traversable route. Equal forward and backward magnitudes remove a simple undiscounted
+oscillatory incentive. They do not establish policy invariance. The standard
+potential-based guarantee requires $F(s,s')=\gamma\Phi(s')-\Phi(s)$ under
+its assumptions \citep{ng1999shaping}. Our distance, waiting, and placement
+bonuses are heuristic objectives and require evaluation under official score.
+
+Waiting and invalid actions receive penalties, and regular training
+transitions include a small step cost. The position-history check
+also penalizes a return to the position recorded two steps earlier.
+This discourages back-and-forth movement, but the same condition can
+also be satisfied by repeated waiting.
+
+As an illustrative example, a sequence involving a predicted-safe
+crate-targeting placement, leaving the blast area, destroying one
+crate, revealing one coin, and collecting that coin contributes
+\[
+0.20 + 0.30 + 0.10 + 0.05 + 7.00 = 7.65.
+\]
+This is the undiscounted sum of those event contributions; movement
+rewards, step costs, and other events would modify the sequence's
+total reward.
+
+The shaping terms also introduce trade-offs. A necessary detour may
+increase the distance to a target, and retreating from an opponent
+may be essential for survival. Waiting can likewise be appropriate
+while an explosion clears. Furthermore, repeated shaping rewards
+can accumulate because their combined contribution is not clipped.
+Evaluation should therefore examine game score, coin collection,
+eliminations, and survival alongside learning reward. Controlled
+comparisons with individual shaping terms removed would be needed
+to establish which components improve performance.
+
+\FloatBarrier
+
+
+\FloatBarrier
+\begingroup\let\section\subsection\let\subsection\subsubsection
+\input{sections/evaluation}\endgroup
+\section{Training}\label{sec:training}
+\contributionauthors{Mark Salzmann, Jesper Eggers}
+
+
+\subsection{Exploration with an epsilon-greedy policy}
+\contributionauthor{Mark Salzmann}
+Both agents implement masked $\epsilon$-greedy selection. Let $\mathcal{A}_m(s)$ be
+the actions retained by its mask. During training, the action is sampled as
+\begin{equation}
+a_t=\begin{cases}
+\text{a uniform random action from }\mathcal{A}_m(s_t),
+& \text{with probability }\epsilon_t,\\
+\displaystyle\operatorname*{arg\,max}_{a\in\mathcal{A}_m(s_t)}
+Q_\theta(s_t,a), & \text{with probability }1-\epsilon_t.
+\end{cases}
+\end{equation}
+Exploration supplies experience with actions that the current network may
+undervalue, whereas exploitation uses what has already been learned. Both branches
+respect the mask. The random branch can also select the greedy action, so
+$\epsilon_t$ is the probability of random selection, not necessarily the
+probability of taking a non-greedy action.
+
+In order to provide sufficient exploration early in training, but gradually reduce it as the agent learns, we use an exponentially decaying epsilon
+\begin{equation}
+\epsilon_t=\epsilon_{\min}+
+(\epsilon_{\mathrm{start}}-\epsilon_{\min}) \cdot \exp\left(-\frac{t}{T_{\mathrm{decay}}}\right).
+\end{equation}
+It is beneficial to choose $T_{\mathrm{decay}} = \frac{T_{\mathrm{Half-life}}}{\ln 2}$.
+
+During the whole training process, the agent is faced with different training epochs. 
+This introduces varying scenarios, obstacles, and opponents.
+The RUEHL curriculum reheats exploration at stage boundaries, as discussed in Section~\ref{sec:curriculum}. The final agent instead derives exploration from its stored step counter, as described below.
+
+
+\subsection{RUEHL curriculum and optimization}
+\contributionauthor{Mark Salzmann}
+
+
+\subsubsection{Training curriculum} \label{sec:curriculum}
+\contributionauthor{Mark Salzmann}
+The training progression considered in this project starts with navigation,
+then introduces bomb use, and finally adds opponents. This curriculum is
+motivated by the difficulty of discovering all three behaviors at once:
+an inexperienced agent can otherwise die before collecting useful examples
+of delayed rewards. Table \ref{tab:curriculum} links the progression to the
+available scenarios.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lccY@{}}
+\toprule
+Scenario & Crate density & Coins & Role in the curriculum \\
+\midrule
+\texttt{coin-heaven} & $0$ & $50$ & Learn movement and collection; the initial stage is intended to run without opponents. \\
+\texttt{loot-crate} & $0.75$ & $50$ & Learn to open routes, reveal coins, and escape after placing bombs. \\
+\texttt{classic} & $0.75$ & $9$ & Combine collection and bomb use with competition against opponents. \\
+\bottomrule
+\end{tabularx}
+\caption{Configured scenarios and their intended training roles. Crate
+density is the placement probability before walls and starting areas are
+cleared. Opponents are configured separately from the scenario.}
+\label{tab:curriculum}
+\end{table}
+
+\paragraph{Stage 1: coin collection.}
+In the \texttt{coin-heaven} scenario, visible coins give a relatively direct
+objective: move through the maze and collect them efficiently. The agent can
+learn spatial relationships between its position, walls, and rewards.
+For this initial stage of training, we started the epsilon greedy strategy with $\epsilon = 1$, ensuring maximum exploration. 
+Via reward shaping, the agent receives immediate feedback for collecting coins, and negative feedback for undesirable actions, guiding it towards efficient coin collection.
+
+\paragraph{Stage 2: crate destruction.}
+The \texttt{loot-crate} scenario adds destructible obstacles and places coins
+preferentially underneath them. Successful collection can now require a
+sequence of actions: approach a crate, place a bomb, reach safety, and return
+to collect a revealed coin. This stage introduces delayed credit assignment
+and the conflict between making progress and avoiding self-destruction.
+Initializing from the pretrained Network on \texttt{coin-heaven}, we continued training with substantial epsilon reheating $\epsilon = 0.85$ to encourage exploration in the presence of destructible crates. 
+For this stage, a different reward profile is used, emphasizing successful crate destruction and safe bomb placement, while still rewarding coin collection and very importantly, penalises suicidal actions.
+
+\paragraph{Stage 3: opponents and competitive play.}
+The main goal for this stage is to adapt to less placed coins, while dealing with dynamic opponents.
+A progression from simpler opponents to stronger ones would let the agent adapt these skills gradually. 
+For this purpose, we iteratively improved the model, by transfering the pretrained network from \texttt{loot-crate} to \texttt{classic} with slight epsilon reheating $\epsilon = 0.20$, then gradually increased the difficulty of opponents.
+
+\subsubsection{Optimization and training state}
+\contributionauthor{Mark Salzmann}
+The training loop stores transitions in a replay buffer of fixed size, and samples
+minibatches uniformly without replacement, starting after the warm-up period.
+It implements the Double DQN target from Equation~\eqref{eq:double dqn}:
+the masked online network selects the next action, and the target network
+evaluates it. 
+For optimization, the \texttt{ruehl\_based\_agent} uses AdamW with a smooth L1 loss, and clips the gradient norm
+to $5.0$. 
+The target network receives a hard copy of the online weights every \texttt{TARGET\_UPDATE} gradient updates.
+
+The replay capacity, batch size, discount factor, learning rate, warm-up,
+update intervals, and evaluation budget are read from \texttt{Hyperparams.prm}.
+
+\subsubsection{Evaluation and model selection}
+\contributionauthor{Mark Salzmann}
+After \texttt{EVAL\_EVERY\_TRAINING\_ROUNDS} training rounds, the agent plays
+\texttt{EVAL\_ROUNDS} greedy evaluation rounds with $\epsilon=0$. During
+these rounds, no transitions are added to the replay buffer and no optimization or
+exploration decay steps occur. 
+Periodic evaluation ensures that model selection is based on up-to-date performance rather than outdated checkpoints, especially for DQN agents \citep{roderick2017implementing}.
+For coin collection and crate exploration, the selection is based on the actual game score rather than accumulated shaping rewards. 
+In competitive play, the selection score is extended by penalising self-destruction and favoring eliminating opponents.
+
+
+\FloatBarrier
+\begingroup\let\section\subsection\let\subsection\subsubsection
+\input{sections/final_training}\endgroup
+\section{Experiments and Results}\label{sec:results}
+\contributionauthors{Mark Salzmann, Eric Flämig, Jesper Eggers}
+
+
+\subsection{Historical RUEHL selection summaries}
+\contributionauthor{Mark Salzmann}
+Table~\ref{tab:training-stage-results} reports the historical best-model summaries for each curriculum stage. The configured checkpoint-selection batch contains 20 greedy evaluation rounds. These selected validation summaries are distinct from an independent test of the frozen checkpoint. The first row gives declared round budgets; command-line budgets in the RUEHL schedule include evaluation rounds.
+
+\begin{table}[htbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.25cm}*{6}{>{\centering\arraybackslash}X}@{}}
+\toprule
+Metric &
+\shortstack{Coin\\collection} &
+\shortstack{Loot\\crate} &
+\shortstack{Peaceful\\killer} &
+\shortstack{Classic\\killer} &
+\shortstack{Classic\\self-play} &
+\shortstack{Classic hard\\opponents} \\
+\midrule
+Declared round budget & 30,000 & 60,000 & 120,000 & 30,000 & 30,000 & 18,500 \\
+Mean game score & 50.00 & 44.90 & 6.45 & 7.95 & 7.10 & 3.95 \\
+Mean coins collected & 50.00 & 44.90 & 3.20 & 4.20 & 2.60 & 1.95 \\
+Mean opponents killed & 0.00 & 0.00 & 0.65 & 0.75 & 0.90 & 0.40 \\
+Completion rate (\%) & 100 & 20 & 0 & 0 & 0 & 0 \\
+Suicide rate (\%) & 0 & 5 & 20 & 5 & 10 & 10 \\
+Mean crates destroyed & 0.00 & 43.40 & 44.05 & 44.60 & 36.35 & 29.10 \\
+\bottomrule
+\end{tabularx}
+\caption{Reported historical best-model summaries across curriculum stages. Completion requires collecting all configured coins with no opponents remaining, and does not measure survival.}
+\label{tab:training-stage-results}
+\end{table}
+
+Figure~\ref{fig:best-score-stages} compares selected-checkpoint summaries for the peaceful-killer and classic-self-play stages. Official game score differs from the killer-profile selection objective $J=\bar S+5\bar K-5p_{\mathrm{self}}$, where $\bar S$ is mean official score, $\bar K$ is mean credited kills, and $p_{\mathrm{self}}$ is the self-destruction fraction. The selection objective therefore gives an additional weight to kills already included in official score. The distinct stages and training histories prevent a controlled comparison of these values.
+
+Selected endpoints describe achieved validation scores rather than a learning trajectory. Stage-specific scenarios, training histories, and selection objectives differ, so these summaries cannot identify convergence rates or a causal effect of the curriculum alone. 
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/verified_curriculum_summaries.png}
+\caption{Historical selected-checkpoint summaries from Git revisions \texttt{e664bca} and \texttt{b66ec29}. Each snapshot configures 20 greedy selection rounds. Official mean score and the checkpoint-selection objective $J$ are shown separately. These are validation summaries for two curriculum stages, rather than independent test estimates.}
+\label{fig:best-score-stages}
+\end{figure}
+
+
+\FloatBarrier
+
+\subsection{Illustrative final-agent training run}
+\contributionauthor{Eric Flämig}
+The final agent was not the submitted agent for the competition, but was trained in parallel to the Ruehl based agent. The following shorter run illustrates its training behavior; it does not establish comparative playing strength.
+
+The following two plots show the performance of the final agent as it was trained on 300 games of loot crate with 50 coins without an opponent, follwoed by around 600 games of classic with nine coins and with three rule based agents as opponents. In order to determine wether or not a completely new network would be able to improve, the rolling average of the coins collected, the opponents killed, the crates destroyed, the score, the suicide ratio and the steps until the game ends were calculated over the last 10 games. Figures~\ref{fig:final-agent-learning-curves-loot} and~\ref{fig:final-agent-learning-curves} show these plots.
+
+As can be seen, during the training in loot crate,the network made constant improvements over the duration of the 300 rounds. The plots showing the classic games, however show that the network had significant trouble adapting to a much more complex tranining environment. Despite double the training and the previous knowledge, from the loot crate training, the score only shows a very slight upwards trend and no improvment in the kill-ability.
+\begin{figure}[p]
+\centering
+\includegraphics[height=0.88\textheight,width=\textwidth,keepaspectratio]{figures/final_agent_loot_crate_learning_curves.png}
+\caption{Archived final-agent training statistics in loot-crate without opponents. Curves are ten-round rolling averages during learning, rather than independent frozen-policy evaluations.}
+\label{fig:final-agent-learning-curves-loot}
+\end{figure}
+\begin{figure}[p]
+\centering
+\includegraphics[height=0.88\textheight,width=\textwidth,keepaspectratio]{figures/final_agent_learning_curves_classic.png}
+\caption{Archived final-agent training statistics in classic with three rule-based opponents. The final panel averages steps only over survived rounds; it is not average episode duration.}
+\label{fig:final-agent-learning-curves}
+\end{figure}
+\FloatBarrier
+
+Figure~\ref{fig:final-agent-learning-curves} contains rolling averages of behavior during training, whereas Figure~\ref{fig:best-score-stages} contains selected greedy-evaluation summaries. These are different estimands. The agents also use different representations, masks, rewards, and training budgets. The early loot-crate improvement is an observation of this final-agent run, and does not isolate the effect of network size or establish faster convergence than RUEHL.
+During development, final-agent rounds were reported to sometimes exceed 60 seconds, with approximately 30 seconds often observed. These development observations concern complete training rounds, which include simulation and optimization as well as action selection. They do not isolate the costs of the network or action mask. Complete decision latency is a separate deployment quantity from elapsed training time per round.
+
+The short classic trace does not determine whether adaptation is limited by the representation, the action mask, reward shaping, or training exposure. A slight upward trend cannot predict that equal training would match or exceed RUEHL's performance. Frozen-policy comparisons measure competitive outcomes; matched training experiments would be needed to attribute differences to individual design choices.
+
+
+\FloatBarrier
+\begingroup\let\section\subsection\let\subsection\subsubsection
+\input{sections/mask_audit}\endgroup
+\begingroup\let\section\subsection\let\subsection\subsubsection
+\input{sections/results}\endgroup
+\begingroup\let\section\subsection\let\subsection\subsubsection
+\input{sections/components}\endgroup
+\begingroup\let\section\subsection\let\subsection\subsubsection
+\input{sections/failures}\endgroup
+\begingroup\let\section\subsection\let\subsection\subsubsection
+\input{sections/compute}\endgroup
+\section{Conclusion}
+\contributionauthors{Mark Salzmann, Eric Flämig, Jesper Eggers}
+
+
+\subsection{Development conclusions}
+\contributionauthor{Mark Salzmann; Final-agent discussion: Eric Flämig}
+
+We developed and evaluated a different agents based on Double DQN, a dueling network architecture, engineered spatial and scalar features, action masking, and a staged training curriculum. 
+The curriculum decomposed the task into progressively harder objectives. The reported selected \texttt{coin-heaven} summary collected all 50 coins, and the \texttt{loot-crate} summary recorded substantial crate destruction; these results describe the corresponding selection batches rather than guaranteeing perfect generalization. 
+The historical RUEHL selection summaries report crate destruction, coin collection, credited eliminations, and self-destruction fractions of 5--20\% in the competitive stages. These selected batches are distinct from the fresh frozen-policy experiment.
+
+The reported selected hard-opponent RUEHL summary gives mean score $3.95$, $0.40$ credited eliminations, and zero completion over a configured twenty-game selection batch. These checkpoint-selection statistics are distinct from the independent component evaluation.  
+These summaries show credited eliminations, but do not establish a competitive win rate or explain particular opponent counter-strategies. Zero completion under the strict all-coins criterion must not be interpreted as zero survival.
+
+Possible next steps include evaluation over longer training periods, more systematic hyperparameter tuning, and training against a diverse population of opponents. These extensions would clarify which design choices contribute most strongly to performance and may improve robustness in the full competitive setting.
+
+The final-agent run shows improvement in the simpler loot-crate stage and limited attack success in the short classic stage. Because training histories and measurement protocols differ, this does not establish faster convergence, inferior architecture, or a common-budget advantage for either design. RUEHL was the submitted artifact, while the final agent provides a contrasting allocation of learned decisions and explicit guidance.
+
+The controlled frozen-policy campaign measures the two masks with one verified final-agent checkpoint under common opponents and seeds. With features and weights held fixed, it identifies how the complete acting mask and learned action ranking contribute to score and survival for the final policy. Comparable retraining budgets and independent evaluation remain necessary to distinguish training exposure from changes in architecture or guidance.
+
+
+\FloatBarrier
+
+
+\begingroup\let\section\subsection\let\subsection\subsubsection
+\input{sections/synthesis}\endgroup
+\FloatBarrier
+\clearpage
+\bibliographystyle{plainnat}
+\bibliography{bib/references,bib/evaluation_references}
+\end{document}

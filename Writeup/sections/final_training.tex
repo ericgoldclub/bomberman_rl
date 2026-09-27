@@ -1,0 +1,13 @@
+\section{Final-agent optimization and checkpointing}
+\contributionauthor{Jesper Eggers}
+The current final-agent implementation uses uniform replay with capacity
+100,000, batch size 64, and a 4,096-transition warm-up. AdamW minimizes
+Smooth L1 loss at learning rate $10^{-4}$ and weight decay $10^{-5}$,
+with discount $0.98$ and gradient norm clipped to five. Four optimization
+passes occur every four regular environment steps; ten further passes
+occur at round end. The target is copied every 2,048 regular training-transition steps.
+Terminal transitions suppress bootstrapping. The network is saved after
+each round, so the default artifact is a continuation checkpoint rather
+than a best-of-validation selection. Its metadata records 1,243 logged rounds.
+Exploration is $\epsilon_t=0.05+0.95\exp(-t/569840)$, with the step counter
+restored on continuation; evaluation sets exploration to zero.

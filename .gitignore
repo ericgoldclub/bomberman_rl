@@ -116,3 +116,5 @@ agent_code/dqn_agent/dqn-replay-buffer.pkl
 
 # DQN replay/current buffer
 agent_code/dqn_agent_v2/dqn-current-buffer
+/tmp
+/output

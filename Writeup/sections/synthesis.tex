@@ -1,0 +1,26 @@
+\section{Synthesis and focused next experiment}
+\label{sec:jesper-synthesis}
+\contributionauthor{Jesper Eggers}
+The completed experiments support three distinct conclusions. Temporal
+masking preserves more viable escapes and admits fewer doomed actions in
+the generated suite. With final-network weights frozen, it improves score
+and reduces self-destruction under both tested opponent populations.
+Learned ranking adds further score beyond the temporal mask, but increases
+self-destruction relative to the corresponding random control. These
+results establish complementary contributions of masking and learned
+selection under controlled deployment conditions.
+
+The competitive trace identifies a concrete remaining weakness: an escape
+can depend on a tile that an opponent reaches before movement executes.
+A focused next experiment would test immediate escape destinations for
+conflicts with reachable opponent occupancy, then compare the resulting
+constraint with the existing mask using frozen weights and paired games.
+Greater conservatism may prevent useful attacks, so score and survival
+must be assessed jointly. Retraining would follow only if this deployment
+test motivates it.
+
+For future competitions, the framework should export initial-layout seeds,
+requested actions, invalid-action events, model hashes, and per-agent
+episode outcomes through one evaluation utility. Separate generators for
+board layouts and action order would make such comparisons reproducible
+by default.

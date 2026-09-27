@@ -1,0 +1,36 @@
+\section{Introduction}
+\label{sec:jesper-introduction}
+\contributionauthor{Jesper Eggers}
+Bomberman makes a useful test of reinforcement learning because an action
+can create both an opportunity and a delayed threat to its own actor.
+Bombs clear terrain and eliminate opponents, but each placement creates
+a delayed hazard that the agent must anticipate. Navigation also changes
+as crates disappear, while opponents compete for coins and alter the
+available routes. A high shaped reward or successful play without
+opponents therefore need not predict competitive strength.
+
+The six discrete actions suit value-based learning. Tabular Q-learning
+provides a conceptual starting point, but enumerating configurations of
+terrain, bombs, and opponents quickly becomes impractical. Neural action
+values offer generalization across configurations; direct policy optimization
+would be another possible approach. We specialize the value-based approach
+through engineered observations, dueling networks, reward shaping, and masks.
+
+Our project implements two agents based on Double DQN and dueling
+networks. RUEHL uses a compact learned representation and comparatively
+simple action constraints. The final agent combines a larger representation
+with explicit temporal survival searches; its name does not denote the
+submitted player, which was RUEHL. The central experimental question
+is how learned action preferences and safety guidance contribute to their
+deployed behavior. Alongside the existing development results, we test the
+masks against engine-derived continuations and evaluate frozen final-agent
+weights in a controlled action-selection experiment. This separates
+constraint quality, learned ranking, and competitive score without adding
+another architecture or training campaign.
+
+We distinguish engine-conditional escape feasibility, learned choices
+within the constraints, and competitive outcomes. Temporal guidance and
+learned ranking both add score in the tested deployment configurations,
+while learned selection increases self-destruction relative to masked
+random play. A replayed opponent collision explains why conditional
+reachability remains weaker than competitive safety.

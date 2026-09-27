@@ -1,0 +1,47 @@
+{
+  "primary_episode": 0,
+  "seed": 270920260,
+  "compared_episode_fields": [
+    "config",
+    "opponents",
+    "episode",
+    "seed",
+    "layout_sha256",
+    "score",
+    "coins",
+    "kills",
+    "suicides",
+    "survived",
+    "win_share",
+    "episode_steps",
+    "bombs",
+    "invalid",
+    "timeout_events",
+    "timeout_skips",
+    "action_count",
+    "threat_bombs",
+    "trapped_threat_bombs"
+  ],
+  "all_compared_episode_fields_match": true,
+  "compared_action_fields": [
+    "step",
+    "action",
+    "executed_action",
+    "bomb_dropped",
+    "threat",
+    "predicted_trap",
+    "death_within_six",
+    "timeout"
+  ],
+  "all_216_action_records_match": true,
+  "all_action_checked_recoverable": 215,
+  "all_action_unsafe_selected": 0,
+  "last_step_is_unrecoverable": true,
+  "final_death_step": 216,
+  "source_sha256": {
+    "Writeup/experiments/results/frozen/final_native_strong.csv": "6987b1838fae066e877712da511cccfb4f9c9aeb25648c26599edecbfe795b5f",
+    "Writeup/experiments/results/frozen/final_native_strong_actions.csv": "03a3b3ce21348b60c9ca34e0dec779168cb948850d15f609bb4f3f97e27b6c86",
+    "Writeup/experiments/results/native_trace_capture/final_native_strong.csv": "c0413d232f178034e1069f12647c977c980313f6a6ca98e8cc44e116b3650df6",
+    "Writeup/experiments/results/native_trace_capture/final_native_strong_actions.csv": "43040c3bef288e9aeb23e4f2a39a6b59d43b49101db1d1a40d512d9440f776f4"
+  }
+}

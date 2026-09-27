@@ -1,0 +1,426 @@
+{
+  "campaign_date": "2026-09-27",
+  "git_revision": "8138269a12969aca5fd7eeee30450181ebc88c78",
+  "episode_count": 1600,
+  "timed_callback_count": 266007,
+  "configurations": [
+    "final_native",
+    "final_ruehl_mask",
+    "random_final_mask",
+    "random_ruehl_mask"
+  ],
+  "opponents": {
+    "strong": [
+      "rule_based_agent",
+      "rule_based_agent",
+      "rule_based_agent"
+    ],
+    "mixed": [
+      "rule_based_agent",
+      "coin_collector_agent",
+      "peaceful_agent"
+    ]
+  },
+  "seeds": [
+    270920260,
+    270920261,
+    270920262,
+    270920263,
+    270920264,
+    270920265,
+    270920266,
+    270920267,
+    270920268,
+    270920269,
+    270920270,
+    270920271,
+    270920272,
+    270920273,
+    270920274,
+    270920275,
+    270920276,
+    270920277,
+    270920278,
+    270920279,
+    270920280,
+    270920281,
+    270920282,
+    270920283,
+    270920284,
+    270920285,
+    270920286,
+    270920287,
+    270920288,
+    270920289,
+    270920290,
+    270920291,
+    270920292,
+    270920293,
+    270920294,
+    270920295,
+    270920296,
+    270920297,
+    270920298,
+    270920299,
+    270920300,
+    270920301,
+    270920302,
+    270920303,
+    270920304,
+    270920305,
+    270920306,
+    270920307,
+    270920308,
+    270920309,
+    270920310,
+    270920311,
+    270920312,
+    270920313,
+    270920314,
+    270920315,
+    270920316,
+    270920317,
+    270920318,
+    270920319,
+    270920320,
+    270920321,
+    270920322,
+    270920323,
+    270920324,
+    270920325,
+    270920326,
+    270920327,
+    270920328,
+    270920329,
+    270920330,
+    270920331,
+    270920332,
+    270920333,
+    270920334,
+    270920335,
+    270920336,
+    270920337,
+    270920338,
+    270920339,
+    270920340,
+    270920341,
+    270920342,
+    270920343,
+    270920344,
+    270920345,
+    270920346,
+    270920347,
+    270920348,
+    270920349,
+    270920350,
+    270920351,
+    270920352,
+    270920353,
+    270920354,
+    270920355,
+    270920356,
+    270920357,
+    270920358,
+    270920359,
+    270920360,
+    270920361,
+    270920362,
+    270920363,
+    270920364,
+    270920365,
+    270920366,
+    270920367,
+    270920368,
+    270920369,
+    270920370,
+    270920371,
+    270920372,
+    270920373,
+    270920374,
+    270920375,
+    270920376,
+    270920377,
+    270920378,
+    270920379,
+    270920380,
+    270920381,
+    270920382,
+    270920383,
+    270920384,
+    270920385,
+    270920386,
+    270920387,
+    270920388,
+    270920389,
+    270920390,
+    270920391,
+    270920392,
+    270920393,
+    270920394,
+    270920395,
+    270920396,
+    270920397,
+    270920398,
+    270920399,
+    270920400,
+    270920401,
+    270920402,
+    270920403,
+    270920404,
+    270920405,
+    270920406,
+    270920407,
+    270920408,
+    270920409,
+    270920410,
+    270920411,
+    270920412,
+    270920413,
+    270920414,
+    270920415,
+    270920416,
+    270920417,
+    270920418,
+    270920419,
+    270920420,
+    270920421,
+    270920422,
+    270920423,
+    270920424,
+    270920425,
+    270920426,
+    270920427,
+    270920428,
+    270920429,
+    270920430,
+    270920431,
+    270920432,
+    270920433,
+    270920434,
+    270920435,
+    270920436,
+    270920437,
+    270920438,
+    270920439,
+    270920440,
+    270920441,
+    270920442,
+    270920443,
+    270920444,
+    270920445,
+    270920446,
+    270920447,
+    270920448,
+    270920449,
+    270920450,
+    270920451,
+    270920452,
+    270920453,
+    270920454,
+    270920455,
+    270920456,
+    270920457,
+    270920458,
+    270920459
+  ],
+  "scenario": "classic",
+  "checkpoint_choice": "Existing final_agent callbacks default MODEL_FILE, selected before campaign outcomes; no test-score search",
+  "checkpoint_sha256": "c268c3fcb5df349117f3a975dd9e158df7439dc25cd6c0be8f4d3fae80c9471e",
+  "checkpoint_metadata": {
+    "architecture_version": 2,
+    "steps_done": 380794,
+    "logged_rounds": 1243,
+    "logged_env_steps": 381319
+  },
+  "source_sha256": {
+    "environment.py": "b84b163f857570b40476082114746ce88896f30ca8505648ca24e04312f66078",
+    "items.py": "49805da4d490d54ec410ce34e5dcdc763e3c8d9b212055b0f83b0972da02df0e",
+    "settings.py": "98ea6705eb75d4b94058e88b6b4aa7876121deea92254026f8505fd7bd857080",
+    "agents.py": "fee34422d7ad086b9d7034be5e5a08bea91648e787a2022df7cb314706a57b8a",
+    "agent_code/final_agent/callbacks.py": "b778ca47d9629518ccc523ac7632a0da9090f108c9b9994d1f70b0fe4d8995d1",
+    "agent_code/final_agent/train.py": "52cf3dad720280551025e73951b2f5337f3c02c1c443d4c946afcd04688dc320",
+    "agent_code/RUEHL_BASED_AGENT/callbacks.py": "dfe8856d2ff505da140957601df8b3003e21fc2f07e041313dfdc9a43f37ace2",
+    "Writeup/experiments/evaluate_frozen_policy.py": "2bcccac8f844c9d5bdc6bd51c678aa6d5b3589fd326ee325c1392c9ece3021e3"
+  },
+  "executed_evaluator_archive": {
+    "path": "Writeup/experiments/archives/evaluate_frozen_policy_executed_v1.py",
+    "sha256": "7020520c871943f2d18ae0ff42a79f5abecbfa1f272b0e1a4747ce1a85b78f77",
+    "historical_executed_sha256": "2bcccac8f844c9d5bdc6bd51c678aa6d5b3589fd326ee325c1392c9ece3021e3",
+    "documentation_change": "The stored archive has a later module-docstring edit. The recovery verifier reconstructs the historical executed bytes in memory and checks the recorded hash."
+  },
+  "reproduction_evaluator": {
+    "path": "Writeup/experiments/evaluate_frozen_policy.py",
+    "sha256": "5d1da1c6976ebe35052588313fb50d427e18695bc703468c119ef8f434086b90",
+    "difference": "Only conversion of NumPy scalar values during final JSON export; acting, physics, measurements and random generators identical",
+    "before_documentation_edit_sha256": "13b7c8ba516fe1bbcc2d35f1b0c12721fcff79dd8296fe4b359bc56468492e06",
+    "documentation_change": "The stored reproduction evaluator has the same later module-docstring edit; acting and measurements are unchanged."
+  },
+  "cpu": "Apple M4",
+  "runtime": {
+    "python": "3.12.14",
+    "numpy": "2.2.6",
+    "torch": "2.8.0",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "cpu_threads": 1
+  },
+  "concurrency": "Independent one-thread evaluator processes ran concurrently; no exclusive CPU affinity",
+  "protocol": "Fixed per-episode layout seeds; separate action-order generator; isolated Python/NumPy streams per agent; episodic input history cleared; unmodified engine physics and timeout enforcement; observer excluded from callback timing; no training.",
+  "timeout_events": 0,
+  "timeout_skips": 0,
+  "ruehl_submitted_checkpoint": "Unavailable; trained RUEHL whole-agent comparison was not run",
+  "groups": [
+    {
+      "config": "final_native",
+      "opponents": "mixed",
+      "episodes": 200,
+      "files": [
+        {
+          "path": "Writeup/experiments/results/frozen/final_native_mixed.csv",
+          "sha256": "5e92b0a72800cae48582c0ed18c4c7d0842d3aa7d1cf0de064287b5975e87fd0"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/final_native_mixed_actions.csv",
+          "sha256": "4bab75470b0d5594dfebd3fb915256e62ce6efb7c3b2c43cad3af84a688eac82"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/final_native_mixed.json",
+          "sha256": "599d0bfb29d9ae794bb600056d9fbd07482da918685437b4f92b6a2efbd7037e"
+        }
+      ]
+    },
+    {
+      "config": "final_native",
+      "opponents": "strong",
+      "episodes": 200,
+      "files": [
+        {
+          "path": "Writeup/experiments/results/frozen/final_native_strong.csv",
+          "sha256": "6987b1838fae066e877712da511cccfb4f9c9aeb25648c26599edecbfe795b5f"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/final_native_strong_actions.csv",
+          "sha256": "03a3b3ce21348b60c9ca34e0dec779168cb948850d15f609bb4f3f97e27b6c86"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/final_native_strong.json",
+          "sha256": "5a067df9c2e591b8aa8d47c5dbe82ce8e807a2a3c2d19151f02571bedd2aae8c"
+        }
+      ]
+    },
+    {
+      "config": "final_ruehl_mask",
+      "opponents": "mixed",
+      "episodes": 200,
+      "files": [
+        {
+          "path": "Writeup/experiments/results/frozen/final_ruehl_mask_mixed.csv",
+          "sha256": "e01a63d980524ae50cfb9af0f6dcf1ec5d40612eba3353bc3fee6bf1c842f07d"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/final_ruehl_mask_mixed_actions.csv",
+          "sha256": "f45f97691776b28d7dc1f7796c5a3e648627e8398ec6216647865079b1fcbb74"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/final_ruehl_mask_mixed.json",
+          "sha256": "84401a5604d7a656af272520923ae7bf76dc2057d164132bf2706e655981ab03"
+        }
+      ]
+    },
+    {
+      "config": "final_ruehl_mask",
+      "opponents": "strong",
+      "episodes": 200,
+      "files": [
+        {
+          "path": "Writeup/experiments/results/frozen/final_ruehl_mask_strong.csv",
+          "sha256": "2e7eb930d825df2e8505b419308187b1494f2b394ed7b3b70a509e7cd25a4503"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/final_ruehl_mask_strong_actions.csv",
+          "sha256": "bef5929477632244d6b5bd2047593a768b26f34dd1db48998034bcf10b435da8"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/final_ruehl_mask_strong.json",
+          "sha256": "03d9c79fc1c522acf0fed196009eec26fd8ae6b4415c6bc3a8888d1362453625"
+        }
+      ]
+    },
+    {
+      "config": "random_final_mask",
+      "opponents": "mixed",
+      "episodes": 200,
+      "files": [
+        {
+          "path": "Writeup/experiments/results/frozen/random_final_mask_mixed.csv",
+          "sha256": "5c735f5a921a2db386946d189ffc847c216bea7850c76fea4def68e0cb0eb54a"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/random_final_mask_mixed_actions.csv",
+          "sha256": "2f1c28d576f3621bcea8ff90eea337168aa40b01d283493b3c87127cd639e38c"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/random_final_mask_mixed.json",
+          "sha256": "1e28c9ca461e4b3da735f41a6c3a77f1d27a789ede67bc0a98c0d6e265d47dcd"
+        }
+      ]
+    },
+    {
+      "config": "random_final_mask",
+      "opponents": "strong",
+      "episodes": 200,
+      "files": [
+        {
+          "path": "Writeup/experiments/results/frozen/random_final_mask_strong.csv",
+          "sha256": "0c7079367c540410e1fea0b5a90d7bacffa0ff86d6d57935a1ddb74fb8ea9734"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/random_final_mask_strong_actions.csv",
+          "sha256": "71176f2df061c7b1cd0bb0b8da88137e05f1bf0199e91672f5d8bf00bdb01399"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/random_final_mask_strong.json",
+          "sha256": "07fb9adf70cd1c5c20d1b8a9cd3764502ccc9064d651ebfe135acc620ff5b689"
+        }
+      ]
+    },
+    {
+      "config": "random_ruehl_mask",
+      "opponents": "mixed",
+      "episodes": 200,
+      "files": [
+        {
+          "path": "Writeup/experiments/results/frozen/random_ruehl_mask_mixed.csv",
+          "sha256": "6f3f01fb398caed0c120c0d92f09d72b2dd65c929de8f9328d030321e1ca1e93"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/random_ruehl_mask_mixed_actions.csv",
+          "sha256": "fe835cb7c0fce008e29f50b32986cda1104c7b8fc64552cd3312fd944d56cd2d"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/random_ruehl_mask_mixed.json",
+          "sha256": "9c5bc03eb132675e9bda893fb38a01766eac5ec97572e8b956f4e367db8c572c"
+        }
+      ]
+    },
+    {
+      "config": "random_ruehl_mask",
+      "opponents": "strong",
+      "episodes": 200,
+      "files": [
+        {
+          "path": "Writeup/experiments/results/frozen/random_ruehl_mask_strong.csv",
+          "sha256": "ede45b432c3f71b5393d8ec4856d0d474866b1002014712c0e9845dd47560891"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/random_ruehl_mask_strong_actions.csv",
+          "sha256": "730559aa2adb8e1629487941ff63209f7cbf61805055a070ce389e0497b7f53f"
+        },
+        {
+          "path": "Writeup/experiments/results/frozen/random_ruehl_mask_strong.json",
+          "sha256": "adefa0f2b8a837fe3deaf4d0badffafdac9c5221030735ff50d62ce3cc636740"
+        }
+      ]
+    }
+  ],
+  "metadata_export_recovery": "Four v1 JSON exports rejected NumPy scalar values after all200 rounds and all callback CSVs were saved. A serialization-only patch and four single-episode deterministic replays recovered the first recorded counterexample. Replay action traces and official outcomes match; raw campaign CSV hashes are unchanged. Group manifests record recovery provenance. Two late successful exports hash the patched on-disk script, while their loaded executed code was v1 archived above. The stored archive and reproduction evaluator now have a later module-docstring edit, with historical source hashes retained separately from their current file hashes."
+}

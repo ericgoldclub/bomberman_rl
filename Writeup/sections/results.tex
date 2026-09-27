@@ -1,0 +1,62 @@
+\section{Frozen-policy performance and opponent dependence}
+\label{sec:jesper-results}
+\contributionauthor{Jesper Eggers}
+Table~\ref{tab:jesper-frozen-evaluation} reports all eight evaluated
+configuration--opponent combinations, with 200 games each. The native
+final policy scores 1.945 points per game against three rule-based
+opponents, with a 95\% interval of [1.655, 2.250]. Its mean comprises
+1.295 coins and 0.130 credited kills; multiplying the latter by five
+accounts for the remaining 0.650 points. Survival is 45.0\%, while
+self-destruction occurs in 54.0\% of games. Of 110 deaths, 108 include
+self-destruction credit, identifying frequent exposure to the agent's own blasts.
+Repeated bombing and a strong safety diagnostic do
+not by themselves establish a strong competitive player.
+
+Against the mixed population, native mean score rises to 2.640
+[2.285, 3.015], comprising 1.415 coins and 0.245 kills. The 0.695-point
+difference from the rule-based population consists of 0.120 additional
+coin points and 0.575 additional kill points. This decomposition identifies
+the source of the observed score change, without attributing it to an
+unmeasured learning mechanism. Survival rises to 51.5\% and self-destruction
+falls to 44.0\%. These are results for one frozen artifact facing two
+specified populations, rather than a universal measure of opponent
+difficulty.
+
+Relative rank gives a different perspective. The native agent's tie-aware
+score-leader share is 15.4\% [10.8, 20.2] against three rule-based opponents
+and 10.2\% [6.5, 14.5] against the mixed population. The higher absolute
+score in mixed games therefore does not translate into a higher observed
+share of first places. Changing opponents also changes the scores the
+focal agent must exceed. This rank comparison is descriptive; the paired
+component tests are conducted within each population. The results show why
+official return and relative success should both be reported.
+
+\input{experiments/results/frozen_evaluation_table.tex}
+
+With the same temporal mask, random selection scores 1.090 against
+rule-based opponents and 1.140 against the mixed population. Learned
+ranking adds 0.855 points [0.490, 1.220] and 1.500 points [1.080, 1.920],
+respectively, in paired comparisons. For rule-based opponents, 0.705
+of the advantage comes from coins and 0.150 from kills. In mixed games,
+coins and kills contribute 0.750 points each. The improvement is therefore
+measurable beyond the hand-designed constraints, with its composition
+depending on the opponents.
+
+Higher score does not imply lower risk. Learned temporal selection
+increases self-destruction over its random control by 11.0 percentage
+points [2.0, 20.5] against rule-based opponents and 12.5 percentage points [3.5, 21.5]
+in mixed games. Its mixed-game survival decreases by 11.5 percentage points
+[2.5, 20.5]. The trained ordering is more productive under the official
+score while retaining a substantial safety weakness. Choosing a policy
+solely from survival would miss its scoring benefit; choosing solely
+from score would conceal the remaining self-inflicted losses.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/frozen_evaluation_performance.png}
+\caption{Official return and score-leader share for the four frozen
+decision configurations and two opponent populations. All learned rows
+use the same final-network weights.}
+\label{fig:jesper-performance}
+\end{figure}
+\FloatBarrier

@@ -1,0 +1,20 @@
+{
+  "purpose": "Report assembly; original main.tex is unchanged; authors are assigned from verified Git history.",
+  "source_main_sha256": "833ee33858fbae882dc096d63c00061115db33b242ae13d95ac70e09ff08cced",
+  "patch_sha256": "f0b6415653d255f81bf8fb56f6d4ea2d1856ff1e215ba6071f539cf6c4627de2",
+  "builder_sha256": "d8a5c601c0270e75f2133e6bd7468adb9c65307aae01d1f37ee8011ca56507f5",
+  "report_source_sha256": "9446153a5f35a1417ce27316e6c6f7b860656d1dcb153adb3dd57148597c5480",
+  "required_chapters": [
+    "Introduction",
+    "Background",
+    "Project planning",
+    "Methods",
+    "Training",
+    "Experiments and Results",
+    "Conclusion"
+  ],
+  "author_provenance_sha256": "be969bb40794df6deedf75e6019df16970a1221badcdda287717b02fca0d4fde",
+  "unknown_original_author_assignments": false,
+  "author_assignment_basis": "Git commit diffs and line-level blame; mixed chapters credit their contributing writers.",
+  "original_source_unchanged": true
+}

@@ -1,0 +1,479 @@
+{
+  "purpose": "Evidence for main authors of the original report; Git authorship is interpreted using the user-confirmed identities. This records writing provenance, not code-development or training responsibility.",
+  "git_revision": "8138269a12969aca5fd7eeee30450181ebc88c78",
+  "source_main_sha256": "833ee33858fbae882dc096d63c00061115db33b242ae13d95ac70e09ff08cced",
+  "identities": {
+    "MarkSalzmann / SalzmannMark": "Mark Salzmann",
+    "ericgoldclub": "Eric Flämig"
+  },
+  "name_spelling": "Eric Flämig follows the original report title.",
+  "method": "Inspect all five main.tex commit diffs and line-level Git blame. Assign homogeneous sections to their recorded writer. Mark the mixed development conclusion as mainly Mark, with Eric credited for the Final-agent discussion; credit all contributing writers at mixed chapter level.",
+  "commits": [
+    {
+      "commit": "155942939b30d13de9a0916466dbad24d33d73e3",
+      "git_author": "MarkSalzmann",
+      "date": "2026-09-16T20:03:17+02:00",
+      "subject": "added writeup"
+    },
+    {
+      "commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "git_author": "SalzmannMark",
+      "date": "2026-09-21T18:22:19+02:00",
+      "subject": "continued Writeup"
+    },
+    {
+      "commit": "998adde22280ed58be49606f0ae4d21d7fc01629",
+      "git_author": "ericgoldclub",
+      "date": "2026-09-25T11:25:12+02:00",
+      "subject": "final agent data collection and first paragraph about it in the write up"
+    },
+    {
+      "commit": "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81",
+      "git_author": "ericgoldclub",
+      "date": "2026-09-27T01:11:19+02:00",
+      "subject": "Eric Write up 80%. Fehlt nur noch conclusion und results fertig schreiben"
+    },
+    {
+      "commit": "8138269a12969aca5fd7eeee30450181ebc88c78",
+      "git_author": "ericgoldclub",
+      "date": "2026-09-27T12:01:49+02:00",
+      "subject": "Eric Write up 3940 wörter mit tabellen"
+    }
+  ],
+  "original_sections": [
+    {
+      "source_heading": "Theoretical Background and Agent Architecture",
+      "level": "section",
+      "source_lines": [
+        35,
+        37
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "155942939b30d13de9a0916466dbad24d33d73e3",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 2
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3"
+      ]
+    },
+    {
+      "source_heading": "Bomberman as a reinforcement learning problem",
+      "level": "subsection",
+      "source_lines": [
+        38,
+        64
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "155942939b30d13de9a0916466dbad24d33d73e3",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 23
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3"
+      ]
+    },
+    {
+      "source_heading": "From Q-learning to deep Q-learning",
+      "level": "subsection",
+      "source_lines": [
+        65,
+        87
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "155942939b30d13de9a0916466dbad24d33d73e3",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 19
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3"
+      ]
+    },
+    {
+      "source_heading": "Double DQN: separating selection and evaluation",
+      "level": "subsection",
+      "source_lines": [
+        88,
+        105
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "155942939b30d13de9a0916466dbad24d33d73e3",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 15
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3"
+      ]
+    },
+    {
+      "source_heading": "Input representation and feature engineering",
+      "level": "subsection",
+      "source_lines": [
+        106,
+        159
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 47
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Exploration with an epsilon-greedy policy",
+      "level": "subsection",
+      "source_lines": [
+        160,
+        188
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 25
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Ruehl based agent",
+      "level": "subsection",
+      "source_lines": [
+        189,
+        190
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 1
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Neural network architecture",
+      "level": "subsubsection",
+      "source_lines": [
+        191,
+        278
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 57
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Training curriculum",
+      "level": "subsubsection",
+      "source_lines": [
+        279,
+        326
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 42
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Action masking and hand-designed guidance",
+      "level": "subsubsection",
+      "source_lines": [
+        327,
+        346
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 17
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Reward shaping",
+      "level": "subsubsection",
+      "source_lines": [
+        347,
+        377
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 28
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Task-specific reward profiles",
+      "level": "subsubsection",
+      "source_lines": [
+        378,
+        438
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 56
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Optimization and training state",
+      "level": "subsubsection",
+      "source_lines": [
+        439,
+        451
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 10
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Evaluation and model selection",
+      "level": "subsubsection",
+      "source_lines": [
+        452,
+        462
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 8
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "The Final Agent",
+      "level": "subsection",
+      "source_lines": [
+        463,
+        467
+      ],
+      "heading_introduced_by": "Eric Flämig",
+      "heading_commit": "998adde22280ed58be49606f0ae4d21d7fc01629",
+      "lines_with_letters_by_author": {
+        "Eric Flämig": 4
+      },
+      "main_author": "Eric Flämig",
+      "content_commits": [
+        "998adde22280ed58be49606f0ae4d21d7fc01629"
+      ]
+    },
+    {
+      "source_heading": "The Features",
+      "level": "subsubsection",
+      "source_lines": [
+        468,
+        539
+      ],
+      "heading_introduced_by": "Eric Flämig",
+      "heading_commit": "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81",
+      "lines_with_letters_by_author": {
+        "Eric Flämig": 71
+      },
+      "main_author": "Eric Flämig",
+      "content_commits": [
+        "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81"
+      ]
+    },
+    {
+      "source_heading": "Neural Network Architecture",
+      "level": "subsubsection",
+      "source_lines": [
+        540,
+        613
+      ],
+      "heading_introduced_by": "Eric Flämig",
+      "heading_commit": "998adde22280ed58be49606f0ae4d21d7fc01629",
+      "lines_with_letters_by_author": {
+        "Eric Flämig": 66
+      },
+      "main_author": "Eric Flämig",
+      "content_commits": [
+        "8138269a12969aca5fd7eeee30450181ebc88c78",
+        "998adde22280ed58be49606f0ae4d21d7fc01629",
+        "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81"
+      ]
+    },
+    {
+      "source_heading": "The Action Mask",
+      "level": "subsubsection",
+      "source_lines": [
+        614,
+        701
+      ],
+      "heading_introduced_by": "Eric Flämig",
+      "heading_commit": "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81",
+      "lines_with_letters_by_author": {
+        "Eric Flämig": 78
+      },
+      "main_author": "Eric Flämig",
+      "content_commits": [
+        "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81"
+      ]
+    },
+    {
+      "source_heading": "The Reward Shaping",
+      "level": "subsubsection",
+      "source_lines": [
+        702,
+        835
+      ],
+      "heading_introduced_by": "Eric Flämig",
+      "heading_commit": "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81",
+      "lines_with_letters_by_author": {
+        "Eric Flämig": 118,
+        "Mark Salzmann": 1
+      },
+      "main_author": "Eric Flämig",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81"
+      ]
+    },
+    {
+      "source_heading": "Results and Discussion",
+      "level": "section",
+      "source_lines": [
+        836,
+        838
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "155942939b30d13de9a0916466dbad24d33d73e3",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 2
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3"
+      ]
+    },
+    {
+      "source_heading": "Ruehl based agent",
+      "level": "subsection",
+      "source_lines": [
+        839,
+        891
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 47
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42"
+      ]
+    },
+    {
+      "source_heading": "Final agent",
+      "level": "subsection",
+      "source_lines": [
+        892,
+        913
+      ],
+      "heading_introduced_by": "Eric Flämig",
+      "heading_commit": "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81",
+      "lines_with_letters_by_author": {
+        "Eric Flämig": 17
+      },
+      "main_author": "Eric Flämig",
+      "content_commits": [
+        "8138269a12969aca5fd7eeee30450181ebc88c78",
+        "ff2fce1f7d34b58f50c1af07e2048bfe02d5dc81"
+      ]
+    },
+    {
+      "source_heading": "Conclusion",
+      "level": "subsection",
+      "source_lines": [
+        914,
+        914
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "155942939b30d13de9a0916466dbad24d33d73e3",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 1
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3"
+      ]
+    },
+    {
+      "source_heading": "Conclusion",
+      "level": "section",
+      "source_lines": [
+        915,
+        937
+      ],
+      "heading_introduced_by": "Mark Salzmann",
+      "heading_commit": "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+      "lines_with_letters_by_author": {
+        "Mark Salzmann": 12,
+        "Eric Flämig": 3
+      },
+      "main_author": "Mark Salzmann",
+      "content_commits": [
+        "155942939b30d13de9a0916466dbad24d33d73e3",
+        "4ea944fde2cfeddc45746aaafb3ed0479a13fa42",
+        "8138269a12969aca5fd7eeee30450181ebc88c78"
+      ]
+    }
+  ],
+  "summary": {
+    "background_and_ruehl_sections": "Mark Salzmann",
+    "final_agent_methods_and_training_results": "Eric Flämig",
+    "development_conclusion": "Mark Salzmann, with Final-agent additions by Eric Flämig",
+    "new_contribution": "Jesper Eggers"
+  },
+  "limits": [
+    "Commits document who added or edited text; they do not establish who performed all underlying experiments or authored every idea."
+  ]
+}

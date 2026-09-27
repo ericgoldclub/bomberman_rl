@@ -1,0 +1,31 @@
+{
+  "selection_rule": "Predetermined first native strong episode; inspect its actual first self-death, not a sample selected by outcome severity",
+  "episode": 0,
+  "seed": 270920260,
+  "action_sequence_matches_primary": true,
+  "steps_shown": [
+    212,
+    215,
+    216
+  ],
+  "conditional_reference_at215": [
+    "RIGHT",
+    "UP",
+    "UP",
+    "UP",
+    "UP",
+    "UP"
+  ],
+  "action_order_at215": [
+    "opponent_2",
+    "focal"
+  ],
+  "mechanism": "Opponent moves DOWN from (11,14) into (11,15) before focal RIGHT; focal remains (10,15). The next observed state admits no surviving action. Focal LEFT executes into (9,15), and its timer-zero bomb at (8,15) detonates.",
+  "source_sha256": {
+    "/Users/jespereggers/Documents/GitHub/bomberman_rl/Writeup/experiments/results/native_trace_capture/observed_states.json": "3bac91c7dd0fd001334d87699ad625dc9341438f83d224d833b3b76fc8a20579",
+    "/Users/jespereggers/Documents/GitHub/bomberman_rl/Writeup/experiments/results/native_trace_capture/final_native_strong_actions.csv": "43040c3bef288e9aeb23e4f2a39a6b59d43b49101db1d1a40d512d9440f776f4",
+    "/Users/jespereggers/Documents/GitHub/bomberman_rl/Writeup/experiments/results/frozen/final_native_strong_actions.csv": "03a3b3ce21348b60c9ca34e0dec779168cb948850d15f609bb4f3f97e27b6c86",
+    "/Users/jespereggers/Documents/GitHub/bomberman_rl/Writeup/experiments/results/native_trace_capture/final_native_strong.csv": "c0413d232f178034e1069f12647c977c980313f6a6ca98e8cc44e116b3650df6",
+    "/Users/jespereggers/Documents/GitHub/bomberman_rl/Writeup/experiments/plot_native_gameplay_failure.py": "45a4f6264afac51ecf8dccc84f9aca1a83211977cdaa4274343e28c36a08e719"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "config": "final_native",
+  "opponents": "strong",
+  "opponent_agents": [
+    "rule_based_agent",
+    "rule_based_agent",
+    "rule_based_agent"
+  ],
+  "episodes": 200,
+  "first_seed": 270920260,
+  "audit_stride": 10,
+  "checkpoint": "/Users/jespereggers/Documents/GitHub/bomberman_rl/agent_code/final_agent/Ultra_Network_agent_saved_model_v2.pt",
+  "checkpoint_sha256": "c268c3fcb5df349117f3a975dd9e158df7439dc25cd6c0be8f4d3fae80c9471e",
+  "checkpoint_metadata": {
+    "architecture_version": 2,
+    "steps_done": 380794,
+    "logged_rounds": 1243,
+    "logged_env_steps": 381319
+  },
+  "python": "3.12.14",
+  "numpy": "2.2.6",
+  "torch": "2.8.0",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "cpu_threads": 1,
+  "protocol": "Fixed per-episode layout seeds; separate action-order generator; isolated Python/NumPy streams per agent; episodic input history cleared; unmodified engine physics and timeout enforcement; observer excluded from callback timing; no training.",
+  "audit_scope": "Every 10 selected actions (zero disables); six-step conditional survival under existing bombs and explosions; current opponents block first movement only, future opponents/new bombs omitted.",
+  "source_sha256": {
+    "environment.py": "b84b163f857570b40476082114746ce88896f30ca8505648ca24e04312f66078",
+    "items.py": "49805da4d490d54ec410ce34e5dcdc763e3c8d9b212055b0f83b0972da02df0e",
+    "settings.py": "98ea6705eb75d4b94058e88b6b4aa7876121deea92254026f8505fd7bd857080",
+    "agents.py": "fee34422d7ad086b9d7034be5e5a08bea91648e787a2022df7cb314706a57b8a",
+    "agent_code/final_agent/callbacks.py": "b778ca47d9629518ccc523ac7632a0da9090f108c9b9994d1f70b0fe4d8995d1",
+    "agent_code/final_agent/train.py": "52cf3dad720280551025e73951b2f5337f3c02c1c443d4c946afcd04688dc320",
+    "agent_code/RUEHL_BASED_AGENT/callbacks.py": "dfe8856d2ff505da140957601df8b3003e21fc2f07e041313dfdc9a43f37ace2",
+    "Writeup/experiments/evaluate_frozen_policy.py": "2bcccac8f844c9d5bdc6bd51c678aa6d5b3589fd326ee325c1392c9ece3021e3"
+  },
+  "counterexamples": []
+}
