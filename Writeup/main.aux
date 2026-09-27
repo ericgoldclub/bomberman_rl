@@ -51,7 +51,6 @@
 \@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces The final agent's twenty-two scalar input features. Here, $(x,y)$ is the agent's current position. Direction features describe the next step suggested by the path search. Historical positions refer to recorded position changes, with consecutive repetitions omitted; missing history entries are encoded as zero. Indices follow the implementation in \texttt  {callbacks.py}.}}{10}{table.7}\protected@file@percent }
 \newlabel{tab:final-agent-scalar-features}{{7}{10}{The final agent's twenty-two scalar input features. Here, $(x,y)$ is the agent's current position. Direction features describe the next step suggested by the path search. Historical positions refer to recorded position changes, with consecutive repetitions omitted; missing history entries are encoded as zero. Indices follow the implementation in \texttt {callbacks.py}}{table.7}{}}
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {1.7.2}Neural Network Architecture}{10}{subsubsection.1.7.2}\protected@file@percent }
-\citation{wang2016dueling}
 \@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Architecture of the final agent's \texttt  {HybridDQN}. The batch dimension is omitted. GN denotes group normalization with eight groups; LN denotes layer normalization. All convolutions use padding 1. Each residual block uses stride 1 and applies convolution--GN--SiLU--convolution--GN, followed by addition of the block input and a final SiLU activation.}}{11}{table.8}\protected@file@percent }
 \newlabel{tab:final-agent-network}{{8}{11}{Architecture of the final agent's \texttt {HybridDQN}. The batch dimension is omitted. GN denotes group normalization with eight groups; LN denotes layer normalization. All convolutions use padding 1. Each residual block uses stride 1 and applies convolution--GN--SiLU--convolution--GN, followed by addition of the block input and a final SiLU activation}{table.8}{}}
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {1.7.3}The Action Mask}{12}{subsubsection.1.7.3}\protected@file@percent }
@@ -60,9 +59,9 @@
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {1.7.4}The Reward Shaping}{13}{subsubsection.1.7.4}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces Reward configuration of the final agent. Positive bomb-placement rewards require a predicted survival path. Bomb-placement categories are mutually exclusive, and the self-destruction penalty replaces the ordinary death penalty.}}{14}{table.10}\protected@file@percent }
 \newlabel{tab:final-agent-rewards}{{10}{14}{Reward configuration of the final agent. Positive bomb-placement rewards require a predicted survival path. Bomb-placement categories are mutually exclusive, and the self-destruction penalty replaces the ordinary death penalty}{table.10}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {2}Results and Discussion}{15}{section.2}\protected@file@percent }
-\newlabel{sec:results}{{2}{15}{Results and Discussion}{section.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Ruehl based agent}{15}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Results and Discussion}{16}{section.2}\protected@file@percent }
+\newlabel{sec:results}{{2}{16}{Results and Discussion}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Ruehl based agent}{16}{subsection.2.1}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces Best-model evaluation metrics across the six training stages. Values are taken from the corresponding \texttt  {Hyperparams.prm} snapshots.}}{16}{table.11}\protected@file@percent }
 \newlabel{tab:training-stage-results}{{11}{16}{Best-model evaluation metrics across the six training stages. Values are taken from the corresponding \texttt {Hyperparams.prm} snapshots}{table.11}{}}
 \@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Best model-selection score as a function of games played in each training stage. The evaluations take place every 200 games, and the current best model is saved if its score improves. The scores of the best models at each checkpoint are reported in Table~\ref {tab:training-stage-results}.}}{16}{figure.1}\protected@file@percent }
@@ -73,8 +72,8 @@
 \bibstyle{plainnat}
 \bibdata{bib/references}
 \bibcite{roderick2017implementing}{{1}{2017}{{Roderick et~al.}}{{Roderick, MacGlashan, and Tellex}}}
-\bibcite{vanhasselt2015double}{{2}{2015}{{van Hasselt et~al.}}{{van Hasselt, Guez, and Silver}}}
-\bibcite{wang2016dueling}{{3}{2016}{{Wang et~al.}}{{Wang, Schaul, Hessel, van Hasselt, Lanctot, and de~Freitas}}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Conclusion}{18}{subsection.2.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {3}Conclusion}{18}{section.3}\protected@file@percent }
-\gdef \@abspage@last{18}
+\bibcite{vanhasselt2015double}{{2}{2015}{{van Hasselt et~al.}}{{van Hasselt, Guez, and Silver}}}
+\bibcite{wang2016dueling}{{3}{2016}{{Wang et~al.}}{{Wang, Schaul, Hessel, van Hasselt, Lanctot, and de~Freitas}}}
+\gdef \@abspage@last{19}

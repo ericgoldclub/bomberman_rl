@@ -539,9 +539,10 @@ Indices follow the implementation in \texttt{callbacks.py}.}
 
 \subsubsection{Neural Network Architecture}
 
-The final agent's network architecture is similar to the Ruehl based agent, but with some modifications to the convolutional layers and the fully connected layers.\\\\
+The final agent's network architecture is similar to the Ruehl based agent, but with some modifications to the convolutional layers and the fully connected layers.
+
 It is based on the same two headed logic, where a CNN evaluates the spatial features and a fully connected network evaluates the scalar features. The outputs of both networks are then concatenated and passed through a series of fully connected layers to produce the final Q-values for each action. In theory a simple CNN should be sufficient for this task, but we decided to add a fully connected network to potentially speed up the training process.\\
-Simply increasing the number of layers in the fully connected network and the CNN lead to a significant increase in the number of parameters, which slowwed down the training process and skewed the ratio of spatial to scalar features which resulted in a worse performance of the final agent. Another problem with that simple approach was the increase in dead neurons in the fully connected layers.\\
+Simply increasing the number of layers in the fully connected network and the CNN lead to a significant increase in the number of parameters, which slowwed down the training process and skewed the ratio of spatial to scalar features which resulted in a worse performance of the final agent. Another problem with that simple approach was the increase in dead neurons in the fully connected layers and the CNN had the problem that after compressing the resoultion in each layer, the network became worse in seeing objects at a distance.\\
 After testing this simple approach, we decided to further increase the complexity of the so called\texttt{HybridDQN}.
 \begin{table}[htbp]
 \centering
@@ -578,7 +579,6 @@ convolution--GN--SiLU--convolution--GN, followed by addition of the
 block input and a final SiLU activation.}
 \label{tab:final-agent-network}
 \end{table}
-
 The final agent’s HybridDQN combines a convolutional neural network with a fully connected network to process two complementary representations of the game state. The convolutional branch extracts spatial patterns from the board, while the fully connected branch processes engineered features that describe relevant game situations explicitly. Their outputs are combined and passed to a dueling architecture, which estimates a shared state value and the relative advantages of individual actions.\\
 The first convolution transforms the 14 spatial feature maps into 32 feature maps while preserving their spatial dimensions. Two subsequent convolutional stages increase the number of channels to 64 and 96, respectively. These stages use a stride of two, reducing the spatial resolution first to \(9\times9\) and then to \(5\times5\). This lets the network combine information across increasingly large regions of the board while limiting the number of features passed to the fully connected layers. Each of these convolutions is followed by group normalization with eight groups and a SiLU activation. The SiLU function was chosen, because with ReLU we previously observed a significant number of dead neurons in the fully connected layers, which we hoped to prevent with the SiLU activation.\\
 Each convolutional stage also contains a residual block. A residual block processes its input through two additional convolutions and then adds the original input to their output. For an input tensor \(x\), the block computes
@@ -589,14 +589,27 @@ followed by
 \begin{align}
     y = SiLU(x + ResBlock(x)).
 \end{align}
+
 Both convolutions use \(3\times3\) kernels, stride one, and padding one. They preserve the number of channels and the spatial dimensions, so the input \(x\) and the transformed features \(F(x)\) can be added element by element. Consequently, the residual blocks preserve the shapes \(32\times17\times17\), \(64\times9\times9\), and \(96\times5\times5\), respectively. The resolution changes occur in the strided convolutions between the blocks.\\
 The addition of \(x\) to the output of the residual block allows the convolutional path to learn corrections or additions to an existing representation. For example, a block can refine features describing nearby crates by incorporating surrounding escape routes. During backpropagation, the addition also provides a direct path for gradients alongside the path through the convolutional layers, making it easier to train a deeper spatial encoder. This was implemented to allow the network to learn from a pretrained starting point, and to improve the learning of more complex spatial relationships.\\\\
-The fully connected branch takes the 22 engineered features as input and processes them through two linear layers with 64 hidden units each. Each layer is followed by layer normalization and a SiLU activation. The output of this branch is a 64-dimensional feature vector that captures relevant scalar information about the game state.\\\\
-This shared representation feeds two separate output heads that follow the idea of \citep{wang2016dueling}. The value head uses a fully connected layer from 256 to 128 units, a SiLU activation, and a final linear layer producing one scalar, \(V(s)\). This scalar provides a common baseline for all six action values. Centering this baseline around zero makes it possible to determine the deviation of each action from that baseline.\\
-\begin{equation}
-    Q(s,a)=V(s)+A(s,a)-\frac{1}{6}\sum_{b=1}^{6}A(s,b)
-\end{equation}
-The advantage head has the same hidden-layer structure, but its final layer produces six outputs, one for each action: moving up, right, down, or left, waiting, and placing a bomb. These outputs, \(A(s,a)\), describe relative action preferences. For example, when a bomb threatens the agent, moving toward a safe tile should receive a higher advantage than waiting. Both heads use linear output layers, allowing them to represent positive and negative values. 
+The fully connected branch takes the 22 engineered features as input and processes them through two linear layers with 64 hidden units each. Each layer is followed by layer normalization and a SiLU activation. The output of this branch is a 64-dimensional feature vector that captures relevant scalar information about the game state.
+
+The final agent uses the dueling decomposition described for the
+Ruehl based agent, combining its value and advantage outputs
+according to Equation~\eqref{eq:dueling}.
+
+In the final agent, both heads receive the shared 256-dimensional
+representation. Each head contains a separate fully connected
+hidden layer with 128 units and a SiLU activation. A final linear
+layer produces one value estimate in the value head and six
+action-specific outputs in the advantage head.
+
+Compared with the direct output layers of the Ruehl network,
+these additional hidden layers allow each head to apply its own
+nonlinear transformation to the shared representation before
+producing its output. The aggregation rule remains unchanged.
+
+This architecture allows the network to be deeper and more complex, compared to the Ruehl based agent, while solving the problems of the simple approach of just increasing the number of layers in the fully connected network and the CNN. 
 
 \subsubsection{The Action Mask}
 One of the main differences between the Ruehl based agent and the final agent is the use of a more guided action selection through the action mask. The intend was to reduce the amount of possible scenarios to only the ones that were legal moves and that did not lead to an immediate suicide of the agent. The reasoning behind that restrictive approach, was to reduce the training time.\\\\
@@ -891,6 +904,12 @@ As can be seen, during the training in loot crate,the network made constant impr
 \end{figure}
 \FloatBarrier
 
+Comparing \ref{fig:final-agent-learning-curves} to \ref{fig:best-score-stages} a very clear difference is the amount of training rounds needed to see improvements in the score. While the Ruehl based agent needed several thaousand games to properly train, the final agent showed significant improvements in the score after only 300 rounds. This supports the idea behind the approach of the final agent, where a more guided approach to the action selection and a bigger neural network should result in a faster convergence of the network.
+However, it should be noted that the final agents training time per game was significantly longer than the Ruehl based agent where it crossed the 60 second mark in several training rounds and an average of 30 seconds per game was not uncommon. This was due to the more complex network architecture and the more complex action mask, which required a lot of additional calculations.
+
+The final agent was not able to achieve the same level of performance as the Ruehl based agent in more advanced trainig scenarios. This begs the question of whether this was due to the more complex network and the more restrictive action mask, or whether the final agent simply didn't have enpugh time to train. The slight increase in score on the reight of \ref{fig:final-agent-learning-curves} suggests that with the same amount of training as the Ruehl based agent, the final agent would be able to at least achieve the same level of performance. However, this is not certain and would require further testing to be sure.
+
+
 
 \subsection{Conclusion}
 \section{Conclusion}
@@ -904,6 +923,11 @@ In particular, the best model against hard opponents achieved a mean score of $3
 Thus, the agent learned meaningful bomb-use and survival-related behavior, but is unable to overcome the enemies counter-strategies consistently.
 
 Possible next steps include evaluation over longer training periods, more systematic hyperparameter tuning, and training against a diverse population of opponents. These extensions would clarify which design choices contribute most strongly to performance and may improve robustness in the full competitive setting.
+
+The other approach we took with the \texttt{final\_agent} showed that a more complex network and a more restrictive action mask and reward shaping can lead to a faster convergence of the network when only looking at the amount of games played. However, due to the significantly longer training time per game, the final agent was not able to achieve the same level of performance in the same amount of time as the \texttt{ruehl\_based\_agent}. This suggests that the more complex network and the more restrictive action mask and reward shaping are not necessarily better than a simpler approach, but rather a different approach to the same problem, given different constraints.\\
+It can be said that for the task at hand with the given time constraints and the computational resources that we had, the simpler approach of the \texttt{ruehl\_based\_agent} was more effective than the more complex approach of the \texttt{final\_agent}. However, it is possible that with more time and resources, the \texttt{final\_agent} could surpass the performance of the \texttt{ruehl\_based\_agent}.
+
+Possible next steps or improvements, to definetly determine the effectiveness of the \texttt{final\_agent} would be, to train it for a longer period of time, or use a more powerful computer with a gpu to speed up the training time per game.
 
 
 \FloatBarrier
