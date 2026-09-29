@@ -1,0 +1,134 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:jesper-introduction}{{1}{1}{Introduction}{section.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{section.2}\protected@file@percent }
+\newlabel{sec:theory}{{2}{2}{Background}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Bomberman as a reinforcement learning problem}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}From Q-learning to deep Q-learning}{2}{subsection.2.2}\protected@file@percent }
+\citation{vanhasselt2015double}
+\newlabel{eq:dqn}{{4}{3}{From Q-learning to deep Q-learning}{equation.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Double DQN: separating selection and evaluation}{3}{subsection.2.3}\protected@file@percent }
+\newlabel{eq:double dqn}{{5}{3}{Double DQN: separating selection and evaluation}{equation.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Project planning}{4}{section.3}\protected@file@percent }
+\newlabel{sec:jesper-planning}{{3}{4}{Project planning}{section.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Methods}{4}{section.4}\protected@file@percent }
+\newlabel{sec:methods}{{4}{4}{Methods}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}RUEHL agent}{4}{subsection.4.1}\protected@file@percent }
+\newlabel{sec:ruehl-methods}{{4.1}{4}{RUEHL agent}{subsection.4.1}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.1}Input representation and feature engineering}{4}{subsubsection.4.1.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Spatial features implemented in \texttt  {callbacks.py}.}}{4}{table.1}\protected@file@percent }
+\newlabel{tab:2d-features}{{1}{4}{Spatial features implemented in \texttt {callbacks.py}}{table.1}{}}
+\citation{wang2016dueling}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Scalar features implemented in \texttt  {callbacks.py}.}}{5}{table.2}\protected@file@percent }
+\newlabel{tab:scalar-features}{{2}{5}{Scalar features implemented in \texttt {callbacks.py}}{table.2}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.2}Neural network architecture}{5}{subsubsection.4.1.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Architecture of the RUEHL network for the configured board size.}}{5}{table.3}\protected@file@percent }
+\newlabel{tab:network}{{3}{5}{Architecture of the RUEHL network for the configured board size}{table.3}{}}
+\citation{wang2016dueling}
+\newlabel{eq:dueling}{{6}{6}{Neural network architecture}{equation.6}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.3}Action masking and hand-designed guidance}{7}{subsubsection.4.1.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.4}Reward shaping}{7}{subsubsection.4.1.4}\protected@file@percent }
+\newlabel{sec:reward-design}{{4.1.4}{7}{Reward shaping}{subsubsection.4.1.4}{}}
+\@writefile{toc}{\contentsline {paragraph}{Main rewards}{7}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Shaping penalties}{7}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.5}Task-specific reward profiles}{8}{subsubsection.4.1.5}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Reward profiles in \texttt  {train.py}. Event values are summed per transition; only the combined shaping contribution is clipped. A zero denotes an event with no assigned reward in that profile.}}{8}{table.4}\protected@file@percent }
+\newlabel{tab:reward-profiles}{{4}{8}{Reward profiles in \texttt {train.py}. Event values are summed per transition; only the combined shaping contribution is clipped. A zero denotes an event with no assigned reward in that profile}{table.4}{}}
+\@writefile{toc}{\contentsline {paragraph}{Coin collection.}{8}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Crate exploration.}{8}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Competitive play.}{8}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Final agent}{9}{subsection.4.2}\protected@file@percent }
+\newlabel{sec:final-methods}{{4.2}{9}{Final agent}{subsection.4.2}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.1}The Features}{9}{subsubsection.4.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.2}Neural Network Architecture}{9}{subsubsection.4.2.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces The final agent's fourteen spatial input channels. Each channel has dimensions $17\times 17$. Channel indices follow the implementation in \texttt  {callbacks.py}.}}{10}{table.5}\protected@file@percent }
+\newlabel{tab:final-agent-spatial-features}{{5}{10}{The final agent's fourteen spatial input channels. Each channel has dimensions $17\times 17$. Channel indices follow the implementation in \texttt {callbacks.py}}{table.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces The final agent's twenty-two scalar input features. Here, $(x,y)$ is the agent's current position. Direction features describe the next step suggested by the path search. Historical positions refer to recorded position changes, with consecutive repetitions omitted; missing history entries are encoded as zero. Indices follow the implementation in \texttt  {callbacks.py}.}}{11}{table.6}\protected@file@percent }
+\newlabel{tab:final-agent-scalar-features}{{6}{11}{The final agent's twenty-two scalar input features. Here, $(x,y)$ is the agent's current position. Direction features describe the next step suggested by the path search. Historical positions refer to recorded position changes, with consecutive repetitions omitted; missing history entries are encoded as zero. Indices follow the implementation in \texttt {callbacks.py}}{table.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Architecture of the final agent's \texttt  {HybridDQN}. The batch dimension is omitted. GN denotes group normalization with eight groups; LN denotes layer normalization. All convolutions use padding 1. Each residual block uses stride 1 and applies convolution--GN--SiLU--convolution--GN, followed by addition of the block input and a final SiLU activation.}}{12}{table.7}\protected@file@percent }
+\newlabel{tab:final-agent-network}{{7}{12}{Architecture of the final agent's \texttt {HybridDQN}. The batch dimension is omitted. GN denotes group normalization with eight groups; LN denotes layer normalization. All convolutions use padding 1. Each residual block uses stride 1 and applies convolution--GN--SiLU--convolution--GN, followed by addition of the block input and a final SiLU activation}{table.7}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.3}The Action Mask}{13}{subsubsection.4.2.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Action-mask rules of the final agent. The fallback stages are applied only when the preceding stage leaves no permitted action.}}{13}{table.8}\protected@file@percent }
+\newlabel{tab:final-agent-action-mask}{{8}{13}{Action-mask rules of the final agent. The fallback stages are applied only when the preceding stage leaves no permitted action}{table.8}{}}
+\citation{ng1999shaping}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.4}The Reward Shaping}{14}{subsubsection.4.2.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces Reward configuration of the final agent. Positive bomb-placement rewards require a predicted survival path. Bomb-placement categories are mutually exclusive, and the self-destruction penalty replaces the ordinary death penalty.}}{15}{table.9}\protected@file@percent }
+\newlabel{tab:final-agent-rewards}{{9}{15}{Reward configuration of the final agent. Positive bomb-placement rewards require a predicted survival path. Bomb-placement categories are mutually exclusive, and the self-destruction penalty replaces the ordinary death penalty}{table.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Experimental evaluation methodology}{16}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:jesper-evaluation}{{4.3}{16}{Experimental evaluation methodology}{subsection.4.3}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.3.1}Separate learning reward, selection score, and game performance}{16}{subsubsection.4.3.1}\protected@file@percent }
+\citation{henderson2018matters,agarwal2021precipice}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.3.2}Independent tests and controlled comparisons}{17}{subsubsection.4.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Training}{18}{section.5}\protected@file@percent }
+\newlabel{sec:training}{{5}{18}{Training}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Exploration with an epsilon-greedy policy}{18}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}RUEHL curriculum and optimization}{18}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {5.2.1}Training curriculum}{18}{subsubsection.5.2.1}\protected@file@percent }
+\newlabel{sec:curriculum}{{5.2.1}{18}{Training curriculum}{subsubsection.5.2.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces Configured scenarios and their intended training roles. Crate density is the placement probability before walls and starting areas are cleared. Opponents are configured separately from the scenario.}}{19}{table.10}\protected@file@percent }
+\newlabel{tab:curriculum}{{10}{19}{Configured scenarios and their intended training roles. Crate density is the placement probability before walls and starting areas are cleared. Opponents are configured separately from the scenario}{table.10}{}}
+\@writefile{toc}{\contentsline {paragraph}{Stage 1: coin collection.}{19}{section*.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Stage 2: crate destruction.}{19}{section*.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Stage 3: opponents and competitive play.}{19}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {5.2.2}Optimization and training state}{19}{subsubsection.5.2.2}\protected@file@percent }
+\citation{roderick2017implementing}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {5.2.3}Evaluation and model selection}{20}{subsubsection.5.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Final-agent optimization and checkpointing}{20}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Experiments and Results}{20}{section.6}\protected@file@percent }
+\newlabel{sec:results}{{6}{20}{Experiments and Results}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Historical RUEHL selection summaries}{20}{subsection.6.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces Reported historical best-model summaries across curriculum stages. Completion requires collecting all configured coins with no opponents remaining, and does not measure survival.}}{20}{table.11}\protected@file@percent }
+\newlabel{tab:training-stage-results}{{11}{20}{Reported historical best-model summaries across curriculum stages. Completion requires collecting all configured coins with no opponents remaining, and does not measure survival}{table.11}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Historical selected-checkpoint summaries from Git revisions \texttt  {e664bca} and \texttt  {b66ec29}. Each snapshot configures 20 greedy selection rounds. Official mean score and the checkpoint-selection objective $J$ are shown separately. These are validation summaries for two curriculum stages, rather than independent test estimates.}}{21}{figure.1}\protected@file@percent }
+\newlabel{fig:best-score-stages}{{1}{21}{Historical selected-checkpoint summaries from Git revisions \texttt {e664bca} and \texttt {b66ec29}. Each snapshot configures 20 greedy selection rounds. Official mean score and the checkpoint-selection objective $J$ are shown separately. These are validation summaries for two curriculum stages, rather than independent test estimates}{figure.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Illustrative final-agent training run}{21}{subsection.6.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Archived final-agent training statistics in loot-crate without opponents. Curves are ten-round rolling averages during learning, rather than independent frozen-policy evaluations.}}{23}{figure.2}\protected@file@percent }
+\newlabel{fig:final-agent-learning-curves-loot}{{2}{23}{Archived final-agent training statistics in loot-crate without opponents. Curves are ten-round rolling averages during learning, rather than independent frozen-policy evaluations}{figure.2}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Archived final-agent training statistics in classic with three rule-based opponents. The final panel averages steps only over survived rounds; it is not average episode duration.}}{24}{figure.3}\protected@file@percent }
+\newlabel{fig:final-agent-learning-curves}{{3}{24}{Archived final-agent training statistics in classic with three rule-based opponents. The final panel averages steps only over survived rounds; it is not average episode duration}{figure.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Engine-based diagnosis of action masking}{25}{subsection.6.3}\protected@file@percent }
+\newlabel{sec:jesper-mask-audit}{{6.3}{25}{Engine-based diagnosis of action masking}{subsection.6.3}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {6.3.1}Question and experimental construction}{25}{subsubsection.6.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {6.3.2}Reference calculation and metrics}{25}{subsubsection.6.3.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces Measured diagnostics on 2,453 recoverable states from the 3,000-state suite. Each fraction uses its own candidate-action denominator.}}{26}{table.12}\protected@file@percent }
+\newlabel{tab:jesper-mask-audit}{{12}{26}{Measured diagnostics on 2,453 recoverable states from the 3,000-state suite. Each fraction uses its own candidate-action denominator}{table.12}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {6.3.3}Measured results and failure mechanisms}{26}{subsubsection.6.3.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Observed action-level diagnostics from the generated suite. Counts and denominators are shown explicitly; these are not measured gameplay death rates.}}{26}{figure.4}\protected@file@percent }
+\newlabel{fig:jesper-mask-comparison}{{4}{26}{Observed action-level diagnostics from the generated suite. Counts and denominators are shown explicitly; these are not measured gameplay death rates}{figure.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces A recorded generated counterexample, not a tournament replay. The board is cropped; all bombs on the full board enter the reference calculation. Green arrows show the first three moves of a surviving continuation beginning with \texttt  {DOWN}.}}{27}{figure.5}\protected@file@percent }
+\newlabel{fig:jesper-mask-counterexample}{{5}{27}{A recorded generated counterexample, not a tournament replay. The board is cropped; all bombs on the full board enter the reference calculation. Green arrows show the first three moves of a surviving continuation beginning with \texttt {DOWN}}{figure.5}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {6.3.4}Implications and limits}{27}{subsubsection.6.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Frozen-policy performance and opponent dependence}{28}{subsection.6.4}\protected@file@percent }
+\newlabel{sec:jesper-results}{{6.4}{28}{Frozen-policy performance and opponent dependence}{subsection.6.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {13}{\ignorespaces Episode means from 200 games per row; score brackets are 95\% episode-bootstrap intervals. Other columns are point estimates, with intervals retained in the supplementary JSON. Score-leader share splits credit among tied highest final scores, including dead agents. Inference is conditional on one checkpoint and the stated opponents. $^{\dagger }$The degenerate all-zero bootstrap interval is suppressed; zero score-leading episodes among 200 games gives a Wilson upper bound of 1.9\% on leader presence, which also bounds expected fractional share.}}{28}{table.13}\protected@file@percent }
+\newlabel{tab:jesper-frozen-evaluation}{{13}{28}{Episode means from 200 games per row; score brackets are 95\% episode-bootstrap intervals. Other columns are point estimates, with intervals retained in the supplementary JSON. Score-leader share splits credit among tied highest final scores, including dead agents. Inference is conditional on one checkpoint and the stated opponents. $^{\dagger }$The degenerate all-zero bootstrap interval is suppressed; zero score-leading episodes among 200 games gives a Wilson upper bound of 1.9\% on leader presence, which also bounds expected fractional share}{table.13}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Official return and score-leader share for the four frozen decision configurations and two opponent populations. All learned rows use the same final-network weights.}}{29}{figure.6}\protected@file@percent }
+\newlabel{fig:jesper-performance}{{6}{29}{Official return and score-leader share for the four frozen decision configurations and two opponent populations. All learned rows use the same final-network weights}{figure.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}What the learned ranking and safety mask contribute}{29}{subsection.6.5}\protected@file@percent }
+\newlabel{sec:jesper-components}{{6.5}{29}{What the learned ranking and safety mask contribute}{subsection.6.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Paired deployment effects on score and survival. Mask effects subtract RUEHL from temporal masking; ranking effects subtract uniform random from Final Q selection within a fixed mask. Whole seed-matched episodes are resampled together.}}{30}{figure.7}\protected@file@percent }
+\newlabel{fig:jesper-components}{{7}{30}{Paired deployment effects on score and survival. Mask effects subtract RUEHL from temporal masking; ranking effects subtract uniform random from Final Q selection within a fixed mask. Whole seed-matched episodes are resampled together}{figure.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.6}Why predicted safety does not ensure competitive survival}{30}{subsection.6.6}\protected@file@percent }
+\newlabel{sec:jesper-failures}{{6.6}{30}{Why predicted safety does not ensure competitive survival}{subsection.6.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Recorded states from the first native-policy episode. Opponent movement blocks a requested escape before it executes. Conditional reachability and physical execution consequently diverge.}}{31}{figure.8}\protected@file@percent }
+\newlabel{fig:jesper-native-failure}{{8}{31}{Recorded states from the first native-policy episode. Opponent movement blocks a requested escape before it executes. Conditional reachability and physical execution consequently diverge}{figure.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.7}Computational constraints and reproducibility}{31}{subsection.6.7}\protected@file@percent }
+\newlabel{sec:jesper-compute}{{6.7}{31}{Computational constraints and reproducibility}{subsection.6.7}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Complete callback latency. Learned rows include features, masking, and network inference; random rows include masking and selection. Intervals use 2,000 episode-cluster bootstrap resamples. Concurrent local CPU evaluation does not reproduce the tournament machine.}}{32}{figure.9}\protected@file@percent }
+\newlabel{fig:jesper-latency}{{9}{32}{Complete callback latency. Learned rows include features, masking, and network inference; random rows include masking and selection. Intervals use 2,000 episode-cluster bootstrap resamples. Concurrent local CPU evaluation does not reproduce the tournament machine}{figure.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion}{32}{section.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Development conclusions}{32}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Synthesis and focused next experiment}{33}{subsection.7.2}\protected@file@percent }
+\newlabel{sec:jesper-synthesis}{{7.2}{33}{Synthesis and focused next experiment}{subsection.7.2}{}}
+\bibstyle{plainnat}
+\bibdata{bib/references,bib/evaluation_references}
+\bibcite{agarwal2021precipice}{{1}{2021}{{Agarwal et~al.}}{{Agarwal, Schwarzer, Castro, Courville, and Bellemare}}}
+\bibcite{henderson2018matters}{{2}{2018}{{Henderson et~al.}}{{Henderson, Islam, Bachman, Pineau, Precup, and Meger}}}
+\bibcite{ng1999shaping}{{3}{1999}{{Ng et~al.}}{{Ng, Harada, and Russell}}}
+\bibcite{roderick2017implementing}{{4}{2017}{{Roderick et~al.}}{{Roderick, MacGlashan, and Tellex}}}
+\bibcite{vanhasselt2015double}{{5}{2015}{{van Hasselt et~al.}}{{van Hasselt, Guez, and Silver}}}
+\bibcite{wang2016dueling}{{6}{2016}{{Wang et~al.}}{{Wang, Schaul, Hessel, van Hasselt, Lanctot, and de~Freitas}}}
+\gdef \@abspage@last{34}
